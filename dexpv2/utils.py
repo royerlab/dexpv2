@@ -4,7 +4,6 @@ from typing import Tuple
 import numpy as np
 from numpy.typing import ArrayLike
 
-
 LOG = logging.getLogger(__name__)
 
 
@@ -18,12 +17,16 @@ def center_crop(arr: ArrayLike, shape: Tuple[int]) -> ArrayLike:
 
     slicing = tuple(slice(s, s + d) for s, d in zip(starts, shape))
 
-    LOG.info(f"center crop: input shape {arr.shape}, output shape {shape}, slicing {slicing}")
+    LOG.info(
+        f"center crop: input shape {arr.shape}, output shape {shape}, slicing {slicing}"
+    )
 
     return arr[slicing]
 
 
-def pad_to_shape(arr: ArrayLike, shape: Tuple[int], mode: str, **kwargs) -> ArrayLike:
+def pad_to_shape(
+    arr: ArrayLike, shape: Tuple[int, ...], mode: str, **kwargs
+) -> ArrayLike:
     """Pads array to shape.
 
     Parameters
@@ -47,6 +50,15 @@ def pad_to_shape(arr: ArrayLike, shape: Tuple[int], mode: str, **kwargs) -> Arra
 
     pad_width = [[s // 2, s - s // 2] for s in dif]
 
-    LOG.info(f"padding: input shape {arr.shape}, output shape {shape}, padding {pad_width}")
+    LOG.info(
+        f"padding: input shape {arr.shape}, output shape {shape}, padding {pad_width}"
+    )
 
     return np.pad(arr, pad_width=pad_width, mode=mode, **kwargs)
+
+
+def to_cpu(arr: ArrayLike) -> ArrayLike:
+    """Moves array to cpu, if it's already there nothing is done."""
+    if hasattr(arr, "get"):
+        arr = arr.get()
+    return arr
