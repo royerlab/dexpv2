@@ -20,13 +20,13 @@ except (ModuleNotFoundError, ImportError):
     LOG.info("cupy not found using numpy and scipy.")
 
 
-@pytest.mark.parametrize("perturb_half", [False, True])
-def test_crosscorr(perturb_half: bool, display_test: bool) -> None:
+@pytest.mark.parametrize("perturb_along_axis", [None, 1, 2])
+def test_crosscorr(perturb_along_axis: bool, display_test: bool) -> None:
     nuclei = xp.asarray(cells3d()[:, 1])
 
     translation = xp.asarray([5, -5, 10])
     view1, view2 = translated_views(
-        nuclei, translation, perturb_half, x_range=7.5, baseline=0.3
+        nuclei, translation, perturb_along_axis, x_range=7.5, baseline=0.3
     )
     estimated_translation = phase_cross_corr(view1, view2, maximum_shift=0.5)
 

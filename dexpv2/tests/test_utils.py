@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -9,7 +9,7 @@ from dexpv2.utils import translation_slicing
 def translated_views(
     img: ArrayLike,
     translation: ArrayLike,
-    perturb_half: bool = False,
+    perturb_along_axis: Optional[int] = None,
     **kwargs,
 ) -> Tuple[ArrayLike, ArrayLike]:
     """
@@ -22,10 +22,10 @@ def translated_views(
         Input image.
     translation : ArrayLike
         Translation between views.
-    perturb_half : bool, optional
-        When true opposite halfs of the image are perturbed, by default False
+    perturb_along_axis : bool, optional
+        When supplied perturb array with blending along axis, by default False
     kwargs :
-        linear_blending keyword arguments
+        linear_blending keyword arguments when perturb half is True.
 
     Returns
     -------
@@ -38,11 +38,16 @@ def translated_views(
 
     assert img1.shape == img2.shape
 
-    if perturb_half:
-        blending = linear_blending(img1.shape[-1], **kwargs)
-        blending = np.asarray(blending, like=img)
-        img1 = img1 * blending[None, None, ...]
-        img2 = img2 * np.flip(blending)[None, None, ...]
+    if perturb_along_axis is not None:
+        length = img1.shape[perturb_along_axis]
+        shape = np.ones(img1.ndim, dtype=int)
+        shape[perturb_along_axis] = length
+
+        blending = linear_blending(length, **kwargs)
+        blending = np.asarray(blending, like=img).reshape(shape)
+
+        img1 = img1 * blending
+        img2 = img2 * np.flip(blending, axis=perturb_along_axis)
 
     return img1, img2
 
