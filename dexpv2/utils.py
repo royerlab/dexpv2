@@ -1,5 +1,5 @@
 import logging
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -82,3 +82,11 @@ def translation_slicing(translation: ArrayLike) -> Tuple[slice, ...]:
         Slicing equivalent to translation.
     """
     return tuple(slice(None, s) if s < 0 else slice(s, None) for s in translation)
+
+
+def normalize(arr: ArrayLike, dtype: Optional[np.dtype] = None) -> ArrayLike:
+    """Normalizes array into the range of (0, 1)."""
+    if dtype:
+        arr = arr.astype(dtype)
+    arr = arr - arr.min()
+    return arr / arr.max()
