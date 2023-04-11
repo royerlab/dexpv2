@@ -62,3 +62,23 @@ def to_cpu(arr: ArrayLike) -> ArrayLike:
     if hasattr(arr, "get"):
         arr = arr.get()
     return arr
+
+
+def translation_slicing(translation: ArrayLike) -> Tuple[slice, ...]:
+    """
+    Helper function to get translation slicing from negative or positive integers for translation.
+
+    For example:
+    (1, -2) -> (slice(1, None), slice(None, -2))
+
+    Parameters
+    ----------
+    translation : ArrayLike
+        Array of translations.
+
+    Returns
+    -------
+    Tuple[slice, ...]
+        Slicing equivalent to translation.
+    """
+    return tuple(slice(None, s) if s < 0 else slice(s, None) for s in translation)

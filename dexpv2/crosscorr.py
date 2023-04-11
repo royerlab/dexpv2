@@ -52,7 +52,9 @@ def phase_cross_corr(
 
     Fimg1 = np.fft.rfftn(ref_img)
     Fimg2 = np.fft.rfftn(mov_img)
-    norm = np.clip(np.abs(Fimg1) * np.abs(Fimg2), 1e-6, None)
+    eps = np.finfo(Fimg1.dtype).eps
+
+    norm = np.fmax(np.abs(Fimg1) * np.abs(Fimg2), eps)
     corr = np.fft.irfftn(Fimg1 * Fimg2.conj() / norm)
     corr = np.fft.fftshift(np.abs(corr))
 
