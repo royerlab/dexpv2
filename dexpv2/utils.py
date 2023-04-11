@@ -7,7 +7,7 @@ from numpy.typing import ArrayLike
 LOG = logging.getLogger(__name__)
 
 
-def center_crop(arr: ArrayLike, shape: Tuple[int]) -> ArrayLike:
+def center_crop(arr: ArrayLike, shape: Tuple[int, ...]) -> ArrayLike:
     """Crops the center of `arr`"""
     assert arr.ndim == len(shape)
 
