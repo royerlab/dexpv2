@@ -21,7 +21,7 @@ except (ModuleNotFoundError, ImportError):
 
 
 @pytest.mark.parametrize("perturb_along_axis", [None, 1, 2])
-def test_crosscorr(perturb_along_axis: bool, display_test: bool) -> None:
+def test_crosscorr(perturb_along_axis: bool, interactive_test: bool) -> None:
     nuclei = xp.asarray(cells3d()[:, 1])
 
     translation = xp.asarray([5, -5, 10])
@@ -30,7 +30,7 @@ def test_crosscorr(perturb_along_axis: bool, display_test: bool) -> None:
     )
     estimated_translation = phase_cross_corr(view1, view2, maximum_shift=0.5)
 
-    if display_test:
+    if interactive_test:
         import napari
 
         viewer = napari.Viewer()

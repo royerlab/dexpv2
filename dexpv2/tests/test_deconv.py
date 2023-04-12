@@ -37,7 +37,7 @@ def gaussian_kernel(size: int, sigma: float, ndim: int) -> ArrayLike:
 
 
 @pytest.mark.parametrize("accelerated", [False, True])
-def test_deconv_2d(accelerated: bool, display_test: bool) -> None:
+def test_deconv_2d(accelerated: bool, interactive_test: bool) -> None:
     img = xp.asarray(color.rgb2gray(astronaut()), dtype=xp.float32)
 
     iterations = 15 if accelerated else 30
@@ -55,7 +55,7 @@ def test_deconv_2d(accelerated: bool, display_test: bool) -> None:
         accelerated=accelerated,
     )
 
-    if display_test:
+    if interactive_test:
         import napari
 
         viewer = napari.Viewer()

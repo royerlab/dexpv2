@@ -19,7 +19,7 @@ except (ModuleNotFoundError, ImportError):
     LOG.info("cupy not found using numpy and scipy.")
 
 
-def test_fusion(display_test: bool) -> None:
+def test_fusion(interactive_test: bool) -> None:
     nuclei = xp.asarray(cells3d()[:, 1])
 
     translation = xp.asarray([5, -5, 10])
@@ -47,7 +47,7 @@ def test_fusion(display_test: bool) -> None:
         translation_slicing(-translation)
     ]  # removing region without overlap
 
-    if display_test:
+    if interactive_test:
         import napari
 
         viewer = napari.Viewer()
