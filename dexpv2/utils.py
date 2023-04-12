@@ -90,3 +90,11 @@ def normalize(arr: ArrayLike, dtype: Optional[np.dtype] = None) -> ArrayLike:
         arr = arr.astype(dtype)
     arr = arr - arr.min()
     return arr / arr.max()
+
+
+def standardize(arr: ArrayLike, dtype: Optional[np.dtype] = None) -> ArrayLike:
+    """Standardizes array into mean zero and standard deviation one."""
+    if dtype:
+        arr = arr.astype(dtype)
+    arr = arr - arr.mean()
+    return arr / arr.std()

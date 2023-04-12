@@ -4,7 +4,7 @@ from numpy.typing import ArrayLike
 from dexpv2.utils import translation_slicing
 
 
-def fuse_multiview(
+def multiview_fuse(
     C0L0: ArrayLike,
     C0L1: ArrayLike,
     C1L0: ArrayLike,
@@ -38,12 +38,13 @@ def fuse_multiview(
     ArrayLike
         Fused image.
     """
-    camera_0 = (C0L0 + C0L1) / 2
-    camera_1 = (C1L0 + C1L1) / 2
+    camera_0 = (C0L0.astype(np.float32) + C0L1) / 2
+    camera_1 = (C1L0.astype(np.float32) + C1L1) / 2
 
     if camera_1_flip:
         camera_1 = np.flip(camera_1, axis=-1)
 
+    camera_1_translation = np.asarray(camera_1_translation, like=camera_0)
     ref_slice = translation_slicing(-camera_1_translation)
     mov_slice = translation_slicing(camera_1_translation)
 

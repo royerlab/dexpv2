@@ -3,7 +3,7 @@ import logging
 from skimage.data import cells3d
 from test_utils import translated_views
 
-from dexpv2.fusion import fuse_multiview
+from dexpv2.fusion import multiview_fuse
 from dexpv2.utils import normalize, to_cpu, translation_slicing
 
 LOG = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ def test_fusion(interactive_test: bool) -> None:
     C0L0, C0L1 = translated_views(camera_0, zeros, 1, **blending_kwargs)
     C1L0, C1L1 = translated_views(camera_1, zeros, 1, **blending_kwargs)
 
-    fused = fuse_multiview(C0L0, C0L1, C1L0, C1L1, translation, camera_1_flip=True)
+    fused = multiview_fuse(C0L0, C0L1, C1L0, C1L1, translation, camera_1_flip=True)
 
     crop_nuclei = nuclei[translation_slicing(translation)]
 

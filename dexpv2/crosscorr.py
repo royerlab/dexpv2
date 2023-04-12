@@ -1,17 +1,21 @@
 import logging
-from typing import Tuple, cast
+from typing import Callable, Tuple, cast
 
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.fftpack import next_fast_len
 
-from dexpv2.utils import center_crop, pad_to_shape
+from dexpv2.constants import DEXPV2_DEBUG
+from dexpv2.utils import center_crop, pad_to_shape, to_cpu
 
 LOG = logging.getLogger(__name__)
 
 
 def phase_cross_corr(
-    ref_img: ArrayLike, mov_img: ArrayLike, maximum_shift: float = 1.0
+    ref_img: ArrayLike,
+    mov_img: ArrayLike,
+    maximum_shift: float = 1.0,
+    to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
 ) -> Tuple[int, ...]:
     """
     Computes translation shift using arg. maximum of phase cross correlation.
@@ -42,7 +46,7 @@ def phase_cross_corr(
     )
 
     if np.any(shape > ref_img.shape):
-        padded_shape = np.maximum(ref_img, shape)
+        padded_shape = np.maximum(ref_img.shape, shape)
         ref_img = pad_to_shape(ref_img, padded_shape, mode="reflect")
         mov_img = pad_to_shape(mov_img, padded_shape, mode="reflect")
 
@@ -50,12 +54,24 @@ def phase_cross_corr(
         ref_img = center_crop(ref_img, shape)
         mov_img = center_crop(mov_img, shape)
 
+    ref_img = to_device(ref_img)
+    mov_img = to_device(mov_img)
+
+    ref_img = np.log1p(ref_img)
+    mov_img = np.log1p(mov_img)
+
     Fimg1 = np.fft.rfftn(ref_img)
     Fimg2 = np.fft.rfftn(mov_img)
     eps = np.finfo(Fimg1.dtype).eps
+    del ref_img, mov_img
 
-    norm = np.fmax(np.abs(Fimg1) * np.abs(Fimg2), eps)
-    corr = np.fft.irfftn(Fimg1 * Fimg2.conj() / norm)
+    prod = Fimg1 * Fimg2.conj()
+    del Fimg1, Fimg2
+
+    norm = np.fmax(np.abs(prod), eps)
+    corr = np.fft.irfftn(prod / norm)
+    del prod, norm
+
     corr = np.fft.fftshift(np.abs(corr))
 
     peak = np.unravel_index(np.argmax(corr), corr.shape)
@@ -63,4 +79,56 @@ def phase_cross_corr(
 
     LOG.info(f"phase cross corr. peak at {peak}")
 
+    if DEXPV2_DEBUG:
+        import napari
+
+        napari.view_image(to_cpu(np.square(corr).real))
+        napari.run()
+
     return peak
+
+
+def multiview_phase_cross_corr(
+    C0L0: ArrayLike,
+    C0L1: ArrayLike,
+    C1L0: ArrayLike,
+    C1L1: ArrayLike,
+    camera_1_flip: bool,
+    maximum_shift: float = 1.0,
+    to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
+) -> Tuple[int, ...]:
+    """
+    Computes the translation between cameras.
+
+    Parameters
+    ----------
+    C0L0 : ArrayLike
+        View from camera 0 and light sheet 0.
+    C0L1 : ArrayLike
+        View from camera 0 and light sheet 0.
+    C1L0 : ArrayLike
+        View from camera 1 and light sheet 0.
+    C1L1 : ArrayLike
+        View from camera 1 and light sheet 1.
+    camera_1_flip : ArrayLike
+        Indicates if camera 1 is flipped on the last axis.
+    maximum_shift : float, optional
+        Maximum location shift normalized by axis size, by default 0.1
+
+    Returns
+    -------
+    ArrayLike
+        Translation between cameras.
+    """
+    camera_0 = C0L0.astype(np.float32) + C0L1
+    camera_1 = C1L0.astype(np.float32) + C1L1
+
+    if camera_1_flip:
+        camera_1 = np.flip(camera_1, -1)
+
+    return phase_cross_corr(
+        camera_0,
+        camera_1,
+        maximum_shift=maximum_shift,
+        to_device=to_device,
+    )
