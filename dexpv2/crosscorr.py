@@ -74,7 +74,7 @@ def phase_cross_corr(
 
     corr = np.fft.fftshift(np.abs(corr))
 
-    peak = np.unravel_index(np.argmax(corr), corr.shape)
+    peak = np.unravel_index(to_cpu(np.argmax(corr)), corr.shape)
     peak = tuple(s // 2 - p for s, p in zip(corr.shape, peak))
 
     LOG.info(f"phase cross corr. peak at {peak}")
