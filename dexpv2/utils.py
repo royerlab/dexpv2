@@ -59,7 +59,9 @@ def pad_to_shape(
 
 def to_cpu(arr: ArrayLike) -> ArrayLike:
     """Moves array to cpu, if it's already there nothing is done."""
-    if hasattr(arr, "get"):
+    if hasattr(arr, "cpu"):
+        arr = arr.cpu()
+    elif hasattr(arr, "get"):
         arr = arr.get()
     return arr
 
