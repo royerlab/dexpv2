@@ -34,7 +34,7 @@ def torch_default_device() -> th.device:
         Torch fastest device.
     """
     if th.cuda.is_available():
-        device = "cuda"
+        device = th.cuda.device_count() - 1
     elif th.backends.mps.is_available():
         device = "mps"
     else:

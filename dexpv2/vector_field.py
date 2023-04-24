@@ -5,7 +5,6 @@ from typing import Optional
 import numpy as np
 import torch as th
 import torch.nn.functional as F
-from numpy.typing import ArrayLike
 
 from dexpv2.constants import DEXPV2_DEBUG
 
@@ -34,23 +33,43 @@ def total_variation_loss(tensor: th.Tensor) -> th.Tensor:
     return loss
 
 
+def identity_grid(shape: tuple[int, ...]) -> th.Tensor:
+    """Grid equivalent to a identity vector field (no flow).
+
+    Parameters
+    ----------
+    shape : tuple[int, ...]
+        Grid shape.
+
+    Returns
+    -------
+    th.Tensor
+        Tensor of shape (Z, Y, X, D)
+    """
+    ndim = len(shape)
+    T = th.zeros((1, ndim, ndim + 1))
+    T[:, :, :-1] = th.eye(ndim)
+    grid_shape = (1, 1) + shape
+    return F.affine_grid(T, grid_shape)
+
+
 def vector_field(
-    source: ArrayLike,
-    target: ArrayLike,
+    source: th.Tensor,
+    target: th.Tensor,
     im_factor: int = 4,
     grid_factor: int = 4,
     num_iterations: int = 2000,
     lr: float = 1e-4,
-) -> ArrayLike:
+) -> th.Tensor:
     """
     Compute the vector field `T` that minimizes the
     mean squared error between `T(source)` and `target`.
 
     Parameters
     ----------
-    source : ArrayLike
+    source : torch.Tensor
         Source image.
-    target : ArrayLike
+    target : torch.Tensor
         Target image.
     im_factor : int, optional
         Image space down scaling factor, by default 4.
@@ -64,7 +83,7 @@ def vector_field(
 
     Returns
     -------
-    ArrayLike
+    torch.Tensor
         Vector field array with shape (D, (Z / factor), Y / factor, X / factor)
     """
     ndim = source.ndim
@@ -80,11 +99,8 @@ def vector_field(
 
     LOG.info(f"source / target shape: {source.shape}")
 
-    T = th.zeros((1, ndim, ndim + 1))
-    T[:, :, :-1] = th.eye(ndim)
-
-    grid_shape = (1, 1) + tuple(m.ceil(s / grid_factor) for s in source.shape[-3:])
-    grid0 = F.affine_grid(T.to(device), grid_shape)
+    grid_shape = tuple(m.ceil(s / grid_factor) for s in source.shape[-3:])
+    grid0 = identity_grid(grid_shape).to(device)
 
     grid = grid0.detach()
     grid.requires_grad_(True).retain_grad()
@@ -155,6 +171,35 @@ def vector_field(
         napari.run()
 
     return grid
+
+
+def apply_field(field: th.Tensor, image: th.Tensor) -> th.Tensor:
+    """
+    Transform image using vector field.
+    Image will be scaled to the field size.
+
+    Parameters
+    ----------
+    field : th.Tensor
+        Vector field (D, z, y, x)
+    image : th.Tensor
+        Original image used to compute the vector field.
+
+    Returns
+    -------
+    th.Tensor
+        Transformed image (z, y, x)
+    """
+    field = th.flip(field, (0,))  # z, y, x -> x, y, z
+    field = field.movedim(0, -1)[None]
+
+    shape = th.tensor(image.shape[::-1], device=field.device)
+    field = field / shape * 2.0  # mapping range from image shape to -1 to 1
+    field = identity_grid(field.shape[1:-1]).to(field.device) - field
+
+    transformed_image = F.grid_sample(image[None, None], field)
+
+    return transformed_image[0, 0]
 
 
 def advenct_field(
