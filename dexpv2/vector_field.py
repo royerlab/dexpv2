@@ -6,7 +6,6 @@ import numpy as np
 import torch as th
 import torch.nn.functional as F
 from numpy.typing import ArrayLike
-from toolz import curry
 
 from dexpv2.constants import DEXPV2_DEBUG
 
@@ -18,27 +17,19 @@ def _interpolate(tensor: th.Tensor, *args, **kwargs) -> th.Tensor:
     return F.interpolate(tensor, *args, **kwargs, mode=mode, align_corners=False)
 
 
-def _cumsum(tensor: th.Tensor) -> th.Tensor:
-    tensor = tensor.double()
-    for i in range(2, tensor.ndim):
-        tensor = tensor.cumsum(dim=i)
-    return tensor
-
-
-def earth_mover_loss(input: th.Tensor, target: th.Tensor) -> th.Tensor:
-    input = _cumsum(input)
-    target = _cumsum(target)
-    loss = th.abs(input - target).mean()
-    return loss
-
-
 def total_variation_loss(tensor: th.Tensor) -> th.Tensor:
     loss = 0.0
     for i in range(1, tensor.ndim - 1):
         idx = th.arange(tensor.shape[i], device=tensor.device)
+        # tv = th.square(
+        #     2 * th.index_select(tensor, i, idx[1:-1]) \
+        #       - th.index_select(tensor, i, idx[2:]) \
+        #       - th.index_select(tensor, i, idx[:-2])
+        # )  # second derivative
         tv = th.square(
-            th.index_select(tensor, i, idx[1:]) - th.index_select(tensor, i, idx[:-1])
-        )
+            th.index_select(tensor, i, idx[:-1]) - th.index_select(tensor, i, idx[1:])
+        )  # first derivative
+
         loss = loss + tv.sum()
     return loss
 
@@ -46,9 +37,9 @@ def total_variation_loss(tensor: th.Tensor) -> th.Tensor:
 def vector_field(
     source: ArrayLike,
     target: ArrayLike,
-    im_factor: int = 8,
+    im_factor: int = 4,
     grid_factor: int = 4,
-    num_iterations: int = 1500,
+    num_iterations: int = 2000,
     lr: float = 1e-4,
 ) -> ArrayLike:
     """
@@ -62,12 +53,12 @@ def vector_field(
     target : ArrayLike
         Target image.
     im_factor : int, optional
-        Image space down scaling factor, by default 8.
+        Image space down scaling factor, by default 4.
     grid_factor : int, optional
         Grid space down scaling factor, by default 4.
         Grid dimensions will be divided by both `im_factor` and `grid_factor`.
     num_iterations : int, optional
-        Number of gradient descent iterations, by default 1500.
+        Number of gradient descent iterations, by default 2000.
     lr : float, optional
         Learning rate (gradient descent step), by default 1e-4
 
@@ -86,10 +77,6 @@ def vector_field(
 
     source = _interpolate(source, scale_factor=1 / im_factor)
     target = _interpolate(target, scale_factor=1 / im_factor)
-
-    avg_kernel = th.ones((3,) * ndim, device=device)[None, None, ...]
-    avg_kernel = avg_kernel / avg_kernel.sum()
-    avg_filter = curry(th.conv3d, weight=avg_kernel, padding=1)
 
     LOG.info(f"source / target shape: {source.shape}")
 
@@ -111,18 +98,13 @@ def vector_field(
         large_grid = th.stack(
             [
                 _interpolate(grid[None, ..., d], source.shape[-3:])[0]
-                # _interpolate(avg_filter(grid[None, ..., d]), source.shape[-3:])[0]
                 for d in range(grid.shape[-1])
             ],
             dim=-1,
         )
 
-        im2hat = F.grid_sample(source, large_grid)
-        # loss = F.mse_loss(im2hat, target)
-        # loss = earth_mover_loss(im2hat, target)
-        loss = th.maximum(
-            F.mse_loss(im2hat, target, reduce=False), th.ones(1, device=device)
-        ).mean()
+        im2hat = F.grid_sample(target, large_grid)
+        loss = F.mse_loss(im2hat, source)
         loss = loss + total_variation_loss(grid - grid0)
         loss.backward()
 
@@ -133,13 +115,17 @@ def vector_field(
 
     with th.no_grad():
         grid = grid - grid0
+        grid = th.flip(grid, (-1,))  # x, y, z -> z, y, x
 
-        # divided by 2.0 because grid spans -1 to 1 (lenth = 2.0)
+        # divided by 2.0 because the range is -1 to 1 (length = 2.0)
         grid = grid * im_factor * th.tensor(source.shape[-ndim:], **kwargs) / 2.0
-        grid = th.moveaxis(grid, -1, 1)
 
         grid = th.stack(
-            [avg_filter(grid[None, ..., d])[0] for d in range(grid.shape[-1])], dim=-1
+            [
+                _interpolate(grid[None, ..., d], source.shape[-3:])[0]
+                for d in range(grid.shape[-1])
+            ],
+            dim=1,
         )[0]
 
         LOG.info(f"vector field shape: {grid.shape}")
@@ -216,12 +202,8 @@ def advenct_field(
         spatial_idx = tuple(
             t[0] for t in th.tensor_split(int_sources, len(orig_shape), dim=1)
         )
-        idx = (
-            t,
-            slice(None),
-        ) + spatial_idx
+        idx = (t, slice(None), *spatial_idx)
         sources = sources + field[idx].T
-        print(field[idx].T)
         trajectories.append(sources)
 
     trajectories = th.stack(trajectories, dim=1)
