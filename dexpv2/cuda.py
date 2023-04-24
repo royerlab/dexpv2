@@ -1,5 +1,7 @@
 import logging
 
+import torch as th
+
 LOG = logging.getLogger(__name__)
 
 try:
@@ -20,3 +22,21 @@ def setup_unified_memory() -> None:
     if cp is None:
         return
     cp.cuda.set_allocator(malloc_managed)
+
+
+def torch_default_device() -> th.device:
+    """
+    Returns "gpu", "mps" or "cpu" devices depending on their availability.
+
+    Returns
+    -------
+    th.device
+        Torch fastest device.
+    """
+    if th.cuda.is_available():
+        device = "cuda"
+    elif th.backends.mps.is_available():
+        device = "mps"
+    else:
+        device = "cpu"
+    return th.device(device)

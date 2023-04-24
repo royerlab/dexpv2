@@ -1,9 +1,12 @@
 import logging
 import math as m
+from typing import Optional
 
+import numpy as np
 import torch as th
 import torch.nn.functional as F
 from numpy.typing import ArrayLike
+from toolz import curry
 
 from dexpv2.constants import DEXPV2_DEBUG
 
@@ -11,8 +14,33 @@ LOG = logging.getLogger(__name__)
 
 
 def _interpolate(tensor: th.Tensor, *args, **kwargs) -> th.Tensor:
-    mode = "triliear" if tensor.ndim == 5 else "bilinear"
+    mode = "trilinear" if tensor.ndim == 5 else "bilinear"
     return F.interpolate(tensor, *args, **kwargs, mode=mode, align_corners=False)
+
+
+def _cumsum(tensor: th.Tensor) -> th.Tensor:
+    tensor = tensor.double()
+    for i in range(2, tensor.ndim):
+        tensor = tensor.cumsum(dim=i)
+    return tensor
+
+
+def earth_mover_loss(input: th.Tensor, target: th.Tensor) -> th.Tensor:
+    input = _cumsum(input)
+    target = _cumsum(target)
+    loss = th.abs(input - target).mean()
+    return loss
+
+
+def total_variation_loss(tensor: th.Tensor) -> th.Tensor:
+    loss = 0.0
+    for i in range(1, tensor.ndim - 1):
+        idx = th.arange(tensor.shape[i], device=tensor.device)
+        tv = th.square(
+            th.index_select(tensor, i, idx[1:]) - th.index_select(tensor, i, idx[:-1])
+        )
+        loss = loss + tv.sum()
+    return loss
 
 
 def vector_field(
@@ -59,6 +87,10 @@ def vector_field(
     source = _interpolate(source, scale_factor=1 / im_factor)
     target = _interpolate(target, scale_factor=1 / im_factor)
 
+    avg_kernel = th.ones((3,) * ndim, device=device)[None, None, ...]
+    avg_kernel = avg_kernel / avg_kernel.sum()
+    avg_filter = curry(th.conv3d, weight=avg_kernel, padding=1)
+
     LOG.info(f"source / target shape: {source.shape}")
 
     T = th.zeros((1, ndim, ndim + 1))
@@ -79,13 +111,19 @@ def vector_field(
         large_grid = th.stack(
             [
                 _interpolate(grid[None, ..., d], source.shape[-3:])[0]
+                # _interpolate(avg_filter(grid[None, ..., d]), source.shape[-3:])[0]
                 for d in range(grid.shape[-1])
             ],
             dim=-1,
         )
 
         im2hat = F.grid_sample(source, large_grid)
-        loss = F.mse_loss(im2hat, target)
+        # loss = F.mse_loss(im2hat, target)
+        # loss = earth_mover_loss(im2hat, target)
+        loss = th.maximum(
+            F.mse_loss(im2hat, target, reduce=False), th.ones(1, device=device)
+        ).mean()
+        loss = loss + total_variation_loss(grid - grid0)
         loss.backward()
 
         LOG.info(f"iter. {i} MSE: {loss:0.4f}")
@@ -100,10 +138,9 @@ def vector_field(
         grid = grid * im_factor * th.tensor(source.shape[-ndim:], **kwargs) / 2.0
         grid = th.moveaxis(grid, -1, 1)
 
-        # mean filter
-        avg = th.zeros((ndim, ndim, 3, 3, 3), **kwargs)
-        avg[th.arange(ndim), th.arange(ndim)] = 1 / 27
-        grid = F.conv3d(grid, avg, padding=1).detach()
+        grid = th.stack(
+            [avg_filter(grid[None, ..., d])[0] for d in range(grid.shape[-1])], dim=-1
+        )[0]
 
         LOG.info(f"vector field shape: {grid.shape}")
 
@@ -132,3 +169,84 @@ def vector_field(
         napari.run()
 
     return grid
+
+
+def advenct_field(
+    field: th.Tensor,
+    sources: th.Tensor,
+    shape: Optional[tuple[int, ...]] = None,
+) -> th.Tensor:
+    """
+    Advenct points from sources through the provided field.
+    Shape indicates the original shape (space) and sources.
+    Useful when field is down scaled from the original space.
+
+    Parameters
+    ----------
+    field : th.Tensor
+        Field array with shape T x D x (Z) x Y x X
+    sources : th.Tensor
+        Array of sources N x D
+    shape : tuple[int, ...]
+        When provided scales field accordingly, D-dimensional tuple.
+
+    Returns
+    -------
+    th.Tensor
+        Trajectories of sources N x T x D
+    """
+    ndim = field.ndim - 2
+    device = field.device
+    orig_shape = th.tensor(shape, device=device)
+    field_shape = th.tensor(field.shape[2:], device=device)
+
+    if orig_shape is None:
+        scales = th.ones(ndim, device=device)
+    else:
+        scales = (field_shape - 1) / (orig_shape - 1)
+
+    trajectories = [sources]
+
+    zero = th.zeros(1, device=device)
+
+    for t in range(field.shape[0]):
+        int_sources = th.round(trajectories[-1] * scales)
+        int_sources = th.maximum(int_sources, zero)
+        int_sources = th.minimum(int_sources, field_shape - 1).int()
+        spatial_idx = tuple(
+            t[0] for t in th.tensor_split(int_sources, len(orig_shape), dim=1)
+        )
+        idx = (
+            t,
+            slice(None),
+        ) + spatial_idx
+        sources = sources + field[idx].T
+        print(field[idx].T)
+        trajectories.append(sources)
+
+    trajectories = th.stack(trajectories, dim=1)
+
+    return trajectories
+
+
+def to_tracks(trajectories: th.Tensor) -> np.ndarray:
+    """Converts trajectories to napari tracks format.
+
+    Parameters
+    ----------
+    trajectories : th.Tensor
+        Input N x T x D trajectories.
+
+    Returns
+    -------
+    np.ndarray
+        Napari tracks (N x T) x (2 + D) array.
+    """
+    trajectories = trajectories.cpu().numpy()
+    N, T, D = trajectories.shape
+
+    track_ids = np.repeat(np.arange(N), T)[..., None]
+    time_pts = np.tile(np.arange(T), N)[..., None]
+    coordinates = trajectories.reshape(-1, D)
+
+    return np.concatenate((track_ids, time_pts, coordinates), axis=1)
