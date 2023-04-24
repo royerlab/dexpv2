@@ -50,7 +50,7 @@ def identity_grid(shape: tuple[int, ...]) -> th.Tensor:
     T = th.zeros((1, ndim, ndim + 1))
     T[:, :, :-1] = th.eye(ndim)
     grid_shape = (1, 1) + shape
-    return F.affine_grid(T, grid_shape)
+    return F.affine_grid(T, grid_shape, align_corners=False)
 
 
 def vector_field(
@@ -119,7 +119,7 @@ def vector_field(
             dim=-1,
         )
 
-        im2hat = F.grid_sample(target, large_grid)
+        im2hat = F.grid_sample(target, large_grid, align_corners=False)
         loss = F.mse_loss(im2hat, source)
         loss = loss + total_variation_loss(grid - grid0)
         loss.backward()
@@ -197,7 +197,7 @@ def apply_field(field: th.Tensor, image: th.Tensor) -> th.Tensor:
     field = field / shape * 2.0  # mapping range from image shape to -1 to 1
     field = identity_grid(field.shape[1:-1]).to(field.device) - field
 
-    transformed_image = F.grid_sample(image[None, None], field)
+    transformed_image = F.grid_sample(image[None, None], field, align_corners=False)
 
     return transformed_image[0, 0]
 
