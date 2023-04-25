@@ -2,10 +2,10 @@ import torch as th
 from toolz import curry
 
 from dexpv2.cuda import torch_default_device
-from dexpv2.vector_field import advenct_field, to_tracks, vector_field
+from dexpv2.flow_field import advenct_field, flow_field, to_tracks
 
 
-def test_vector_field(interactive_test: bool) -> None:
+def test_flow_field(interactive_test: bool) -> None:
 
     device = torch_default_device()
     intensity = 1_000
@@ -29,8 +29,8 @@ def test_vector_field(interactive_test: bool) -> None:
         [intensity * th.exp(-th.square(grid - mu).sum(dim=-1) / sigma) for mu in mus]
     )
 
-    _vector_field = curry(
-        vector_field,
+    _flow_field = curry(
+        flow_field,
         im_factor=im_factor,
         grid_factor=grid_factor,
         num_iterations=2000,
@@ -39,7 +39,7 @@ def test_vector_field(interactive_test: bool) -> None:
 
     fields = th.stack(
         [
-            _vector_field(frames[i - 1, None], frames[i, None])
+            _flow_field(frames[i - 1, None], frames[i, None])
             for i in range(1, len(frames))
         ]
     )

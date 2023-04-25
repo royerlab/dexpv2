@@ -7,7 +7,7 @@ from tifffile import imread
 
 from dexpv2.cli.utils import interactive_option, log_level_option
 from dexpv2.cuda import torch_default_device
-from dexpv2.vector_field import apply_field, vector_field
+from dexpv2.flow_field import apply_field, flow_field
 
 
 def _load_tensor(path: Path) -> th.Tensor:
@@ -22,7 +22,7 @@ def _load_tensor(path: Path) -> th.Tensor:
 def main(interactive: bool) -> None:
     """Runs vector field estimation in two frames."""
 
-    data_dir = Path(os.environ["BACKTEST_DIR"]) / "frames_vector_field"
+    data_dir = Path(os.environ["BACKTEST_DIR"]) / "frames_flow_field"
     assert data_dir.exists()
 
     im_factor = 4
@@ -30,7 +30,7 @@ def main(interactive: bool) -> None:
     im1 = _load_tensor(data_dir / "450.tif")
     im2 = _load_tensor(data_dir / "455.tif")
 
-    field = vector_field(im1, im2, im_factor=im_factor)
+    field = flow_field(im1, im2, im_factor=im_factor)
     im2hat = apply_field(field, im1)
     scale = (im_factor,) * (im1.ndim - 1)
 

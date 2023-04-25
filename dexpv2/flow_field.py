@@ -53,7 +53,7 @@ def identity_grid(shape: tuple[int, ...]) -> th.Tensor:
     return F.affine_grid(T, grid_shape, align_corners=False)
 
 
-def vector_field(
+def flow_field(
     source: th.Tensor,
     target: th.Tensor,
     im_factor: int = 4,
@@ -62,7 +62,7 @@ def vector_field(
     lr: float = 1e-4,
 ) -> th.Tensor:
     """
-    Compute the vector field `T` that minimizes the
+    Compute the flow vector field `T` that minimizes the
     mean squared error between `T(source)` and `target`.
 
     Parameters
