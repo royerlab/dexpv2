@@ -68,9 +68,9 @@ def vector_field(
     Parameters
     ----------
     source : torch.Tensor
-        Source image.
+        Source image (C, Z, Y, X).
     target : torch.Tensor
-        Target image.
+        Target image (C, Z, Y, X).
     im_factor : int, optional
         Image space down scaling factor, by default 4.
     grid_factor : int, optional
@@ -86,10 +86,13 @@ def vector_field(
     torch.Tensor
         Vector field array with shape (D, (Z / factor), Y / factor, X / factor)
     """
-    ndim = source.ndim
+    assert source.shape == target.shape
+    assert source.ndim == 4
 
-    source = th.as_tensor(source[None, None])
-    target = th.as_tensor(target[None, None])
+    ndim = source.ndim - 1
+
+    source = source.unsqueeze(0)
+    target = target.unsqueeze(0)
 
     device = source.device
     kwargs = dict(device=device, requires_grad=False)
@@ -190,16 +193,18 @@ def apply_field(field: th.Tensor, image: th.Tensor) -> th.Tensor:
     th.Tensor
         Transformed image (z, y, x)
     """
+    assert image.ndim == 4
+
     field = th.flip(field, (0,))  # z, y, x -> x, y, z
     field = field.movedim(0, -1)[None]
 
     shape = th.tensor(image.shape[::-1], device=field.device)
-    field = field / shape * 2.0  # mapping range from image shape to -1 to 1
+    field = field / shape[:-1] * 2.0  # mapping range from image shape to -1 to 1
     field = identity_grid(field.shape[1:-1]).to(field.device) - field
 
-    transformed_image = F.grid_sample(image[None, None], field, align_corners=False)
+    transformed_image = F.grid_sample(image[None], field, align_corners=False)
 
-    return transformed_image[0, 0]
+    return transformed_image[0]
 
 
 def advenct_field(

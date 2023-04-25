@@ -12,7 +12,8 @@ from dexpv2.vector_field import apply_field, vector_field
 
 def _load_tensor(path: Path) -> th.Tensor:
     device = torch_default_device()
-    return th.tensor(imread(path).astype("float32"), device=device)
+    array = imread(path).astype("float32")[None]
+    return th.tensor(array, device=device)
 
 
 @click.command()
@@ -31,7 +32,7 @@ def main(interactive: bool) -> None:
 
     field = vector_field(im1, im2, im_factor=im_factor)
     im2hat = apply_field(field, im1)
-    scale = (im_factor,) * im1.ndim
+    scale = (im_factor,) * (im1.ndim - 1)
 
     if interactive:
         import napari
@@ -39,12 +40,14 @@ def main(interactive: bool) -> None:
         viewer = napari.Viewer()
         kwargs = {"blending": "additive"}
 
-        viewer.add_image(im1.cpu().numpy(), colormap="blue", name="frame 450", **kwargs)
         viewer.add_image(
-            im2.cpu().numpy(), colormap="green", name="frame 455", **kwargs
+            im1[0].cpu().numpy(), colormap="blue", name="frame 450", **kwargs
         )
         viewer.add_image(
-            im2hat.cpu().numpy(),
+            im2[0].cpu().numpy(), colormap="green", name="frame 455", **kwargs
+        )
+        viewer.add_image(
+            im2hat[0].cpu().numpy(),
             colormap="red",
             name="T(frame 450)",
             scale=scale,

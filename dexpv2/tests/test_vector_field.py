@@ -38,7 +38,10 @@ def test_vector_field(interactive_test: bool) -> None:
     )
 
     fields = th.stack(
-        [_vector_field(frames[i - 1], frames[i]) for i in range(1, len(frames))]
+        [
+            _vector_field(frames[i - 1, None], frames[i, None])
+            for i in range(1, len(frames))
+        ]
     )
 
     trajectory = advenct_field(fields, mus[None, 0], size)
