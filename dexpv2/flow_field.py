@@ -212,6 +212,7 @@ def advenct_field(
     field: ArrayLike,
     sources: th.Tensor,
     shape: Optional[tuple[int, ...]] = None,
+    invert: bool = False,
 ) -> th.Tensor:
     """
     Advenct points from sources through the provided field.
@@ -226,6 +227,8 @@ def advenct_field(
         Array of sources N x D
     shape : tuple[int, ...]
         When provided scales field accordingly, D-dimensional tuple.
+    invert : bool
+        When true flow is multiplied by -1, resulting in reversal of the flow.
 
     Returns
     -------
@@ -257,7 +260,11 @@ def advenct_field(
         )
         idx = (slice(None), *spatial_idx)
 
-        sources = sources + current[idx].T
+        if invert:
+            sources = sources - current[idx].T
+        else:
+            sources = sources + current[idx].T
+
         trajectories.append(sources)
 
     trajectories = th.stack(trajectories, dim=1)
