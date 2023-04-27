@@ -4,21 +4,10 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from dexpv2.constants import DEXPV2_DEBUG
+from dexpv2.cuda import import_module
 from dexpv2.utils import to_cpu
 
 LOG = logging.getLogger(__name__)
-
-try:
-    import cupyx.scipy.ndimage as ndi
-    from cucim.skimage import filters
-
-    LOG.info("cupy/cucim found.")
-
-except (ModuleNotFoundError, ImportError):
-    import scipy.ndimage as ndi
-    from skimage import filters
-
-    LOG.info("cupy/cucim not found using scipy and skimage.")
 
 
 def reconstruction_by_dilation(
@@ -44,6 +33,8 @@ def reconstruction_by_dilation(
     -------
         Image reconstructed by dilation.
     """
+    ndi = import_module("scipy", "ndimage")
+
     seed = np.minimum(seed, mask)  # just making sure
 
     for _ in range(iterations):
@@ -75,6 +66,9 @@ def detect_foreground(
     ArrayLike
         Binary foreground mask.
     """
+    ndi = import_module("scipy", "ndimage")
+    filters = import_module("skimage", "filters")
+
     sigmas = [sigma / s for s in voxel_size]
 
     LOG.info(f"Detecting foreground with voxel size {voxel_size} and sigma {sigma}")
@@ -105,14 +99,3 @@ def detect_foreground(
         napari.run()
 
     return mask
-
-
-if __name__ == "__main__":
-    import os
-
-    import cupy as cp
-    from tifffile import imread
-
-    im = cp.asarray(imread(f"{os.environ['BACKTEST_DIR']}/frames_flow_field/455.tif"))
-
-    detect_foreground(im, [2, 0.5, 0.5])
