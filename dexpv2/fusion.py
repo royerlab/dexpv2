@@ -1,7 +1,12 @@
+import logging
+from typing import Callable
+
 import numpy as np
 from numpy.typing import ArrayLike
 
 from dexpv2.utils import translation_slicing
+
+LOG = logging.getLogger(__name__)
 
 
 def multiview_fuse(
@@ -11,6 +16,7 @@ def multiview_fuse(
     C1L1: ArrayLike,
     camera_1_translation: ArrayLike,
     camera_1_flip: bool,
+    to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
 ) -> ArrayLike:
     """
     Fuse views from a multi-view microscope.
@@ -32,21 +38,29 @@ def multiview_fuse(
         Translation between camera 1 and camera 0 (reference).
     camera_1_flip : ArrayLike
         Indicates if camera 1 is flipped on the last axis.
+    to_device : Callable, optional
+        Helper function to send data to specialized device, this function sends the data
+        to the device only when needed, reducing the memory usage.
 
     Returns
     -------
     ArrayLike
         Fused image.
     """
-    camera_0 = (C0L0.astype(np.float32) + C0L1) / 2
-    camera_1 = (C1L0.astype(np.float32) + C1L1) / 2
+    camera_0 = (to_device(C0L0).astype(np.float32) + to_device(C0L1)) / 2
+    camera_1 = (to_device(C1L0).astype(np.float32) + to_device(C1L1)) / 2
 
-    if camera_1_flip:
-        camera_1 = np.flip(camera_1, axis=-1)
+    if camera_0.dtype != np.float32:
+        LOG.warning(
+            f"fusion array cast to {camera_0.dtype} using more memory than expected."
+        )
 
     camera_1_translation = np.asarray(camera_1_translation, like=camera_0)
     ref_slice = translation_slicing(-camera_1_translation)
     mov_slice = translation_slicing(camera_1_translation)
+
+    if camera_1_flip:
+        camera_1 = np.flip(camera_1, axis=-1)
 
     fused = camera_0
     fused[ref_slice] = (fused[ref_slice] + camera_1[mov_slice]) / 2

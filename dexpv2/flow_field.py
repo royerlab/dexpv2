@@ -5,6 +5,7 @@ from typing import Optional
 import numpy as np
 import torch as th
 import torch.nn.functional as F
+from numpy.typing import ArrayLike
 
 from dexpv2.constants import DEXPV2_DEBUG
 
@@ -208,7 +209,7 @@ def apply_field(field: th.Tensor, image: th.Tensor) -> th.Tensor:
 
 
 def advenct_field(
-    field: th.Tensor,
+    field: ArrayLike,
     sources: th.Tensor,
     shape: Optional[tuple[int, ...]] = None,
 ) -> th.Tensor:
@@ -219,7 +220,7 @@ def advenct_field(
 
     Parameters
     ----------
-    field : th.Tensor
+    field : ArrayLike
         Field array with shape T x D x (Z) x Y x X
     sources : th.Tensor
         Array of sources N x D
@@ -232,7 +233,7 @@ def advenct_field(
         Trajectories of sources N x T x D
     """
     ndim = field.ndim - 2
-    device = field.device
+    device = sources.device
     orig_shape = th.tensor(shape, device=device)
     field_shape = th.tensor(field.shape[2:], device=device)
 
@@ -253,7 +254,8 @@ def advenct_field(
             t[0] for t in th.tensor_split(int_sources, len(orig_shape), dim=1)
         )
         idx = (t, slice(None), *spatial_idx)
-        sources = sources + field[idx].T
+        step = th.as_tensor(field[idx], device=device).T
+        sources = sources + step
         trajectories.append(sources)
 
     trajectories = th.stack(trajectories, dim=1)

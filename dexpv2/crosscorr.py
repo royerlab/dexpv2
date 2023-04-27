@@ -114,6 +114,9 @@ def multiview_phase_cross_corr(
         Indicates if camera 1 is flipped on the last axis.
     maximum_shift : float, optional
         Maximum location shift normalized by axis size, by default 0.1
+    to_device : Callable, optional
+        Helper function to send data to specialized device, this function sends the data
+        to the device only when needed, reducing the memory usage.
 
     Returns
     -------
