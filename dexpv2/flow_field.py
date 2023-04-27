@@ -247,15 +247,17 @@ def advenct_field(
     zero = th.zeros(1, device=device)
 
     for t in range(field.shape[0]):
+        current = th.as_tensor(field[t]).to(device=device, non_blocking=True)
+
         int_sources = th.round(trajectories[-1] * scales)
         int_sources = th.maximum(int_sources, zero)
         int_sources = th.minimum(int_sources, field_shape - 1).int()
         spatial_idx = tuple(
-            t[0] for t in th.tensor_split(int_sources, len(orig_shape), dim=1)
+            t.T[0] for t in th.tensor_split(int_sources, len(orig_shape), dim=1)
         )
-        idx = (t, slice(None), *spatial_idx)
-        step = th.as_tensor(field[idx], device=device).T
-        sources = sources + step
+        idx = (slice(None), *spatial_idx)
+
+        sources = sources + current[idx].T
         trajectories.append(sources)
 
     trajectories = th.stack(trajectories, dim=1)
