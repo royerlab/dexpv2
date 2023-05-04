@@ -35,11 +35,11 @@ def reconstruction_by_dilation(
     """
     ndi = import_module("scipy", "ndimage")
 
-    seed = np.minimum(seed, mask)  # just making sure
+    seed = np.minimum(seed, mask, out=seed)  # just making sure
 
     for _ in range(iterations):
         seed = ndi.grey_dilation(seed, size=3, output=seed, mode="constant")
-        seed = np.minimum(seed, mask)
+        seed = np.minimum(seed, mask, out=seed)
 
     return seed
 
