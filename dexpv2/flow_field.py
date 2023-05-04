@@ -124,7 +124,7 @@ def flow_field(
         )
 
         im2hat = F.grid_sample(target, large_grid, align_corners=False)
-        loss = F.mse_loss(im2hat, source)
+        loss = F.l1_loss(im2hat, source)
         loss = loss + total_variation_loss(grid - grid0)
         loss.backward()
 
