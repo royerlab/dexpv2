@@ -68,6 +68,7 @@ def detect_foreground(
     """
     ndi = import_module("scipy", "ndimage")
     filters = import_module("skimage", "filters")
+    exposure = import_module("skimage", "exposure")
 
     sigmas = [sigma / s for s in voxel_size]
 
@@ -83,8 +84,31 @@ def detect_foreground(
 
     # threshold in smaller image to save memory and sqrt to deskew data distribution towards left
     small_foreground = np.sqrt(ndi.zoom(foreground, (0.25,) * foreground.ndim, order=1))
-    mask = foreground > np.square(filters.threshold_otsu(small_foreground))
-    del foreground, small_foreground
+
+    # begin thresholding
+    robust_max = np.quantile(small_foreground, 1 - 1e-6)
+    small_foreground = np.minimum(robust_max, small_foreground, out=small_foreground)
+
+    # number of bins according to maximum value
+    nbins = int(robust_max / 10)  # binning with window of 10
+    nbins = min(nbins, 256)
+    nbins = max(nbins, 10)
+
+    LOG.info(f"Estimated almost max. {np.square(robust_max)}")
+    LOG.info(f"Histogram with {nbins}")
+
+    # histogram disconsidering pixels we are sure are background
+    hist, bin_centers = exposure.histogram(small_foreground, nbins)
+    remaining_background_idx = hist.argmax() + 1
+    hist = hist[remaining_background_idx:]
+    bin_centers = bin_centers[remaining_background_idx:]
+
+    del small_foreground
+    threshold = np.square(filters.threshold_otsu(hist=(hist, bin_centers)))
+    LOG.info(f"Threshold {threshold}")
+
+    mask = foreground > threshold
+    del foreground
 
     struct = ndi.generate_binary_structure(mask.ndim, 2)
     mask = ndi.binary_opening(mask, structure=struct, output=mask)
