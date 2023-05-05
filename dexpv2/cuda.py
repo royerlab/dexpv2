@@ -1,4 +1,6 @@
+import importlib
 import logging
+from types import ModuleType
 
 import torch as th
 
@@ -12,6 +14,12 @@ try:
 except (ModuleNotFoundError, ImportError):
     LOG.info("cupy not found.")
     cp = None
+
+
+CUPY_MODULES = {
+    "scipy": "cupyx.scipy",
+    "skimage": "cucim.skimage",
+}
 
 
 def setup_unified_memory() -> None:
@@ -40,3 +48,32 @@ def torch_default_device() -> th.device:
     else:
         device = "cpu"
     return th.device(device)
+
+
+def import_module(module: str, submodule: str) -> ModuleType:
+    """Import GPU accelerated module if available, otherwise returns CPU version.
+
+    Parameters
+    ----------
+    module : str
+        Main python module (e.g. skimage, scipy)
+
+    submodule : str
+        Secondary python module (e.g. morphology, ndimage)
+
+    Returns
+    -------
+    ModuleType
+        Imported submodule.
+    """
+    cupy_module_name = f"{CUPY_MODULES[module]}.{submodule}"
+    try:
+        pkg = importlib.import_module(cupy_module_name)
+        LOG.info(f"{cupy_module_name} found.")
+
+    except (ModuleNotFoundError, ImportError):
+
+        pkg = importlib.import_module(f"{module}.{submodule}")
+        LOG.info(f"{cupy_module_name} not found. Using cpu equivalent")
+
+    return pkg
