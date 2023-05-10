@@ -62,7 +62,7 @@ def multiview_fuse(
     if camera_1_flip:
         camera_1 = np.flip(camera_1, axis=-1)
 
-    fused = camera_0
-    fused[ref_slice] = (fused[ref_slice] + camera_1[mov_slice]) / 2
+    camera_0[ref_slice] += camera_1[mov_slice]
+    camera_0[ref_slice] /= 2
 
-    return fused
+    return camera_0
