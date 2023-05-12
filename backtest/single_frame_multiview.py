@@ -8,7 +8,7 @@ from tifffile import imread
 
 from dexpv2.cli.utils import interactive_option, log_level_option
 from dexpv2.crosscorr import multiview_phase_cross_corr
-from dexpv2.cuda import setup_unified_memory
+from dexpv2.cuda import unified_memory
 from dexpv2.fusion import multiview_fuse
 from dexpv2.utils import to_cpu
 
@@ -28,25 +28,24 @@ def main(interactive: bool) -> None:
         kwargs = {"colormap": "magma", "blending": "additive"}
 
     channels = ["h2afva", "mezzo"]
-    setup_unified_memory()
 
     for ch in channels:
-        cp.clear_memo()
         views = {
             re.findall("C[01]+L[01]+", p.name)[0]: imread(p)
             for p in data_dir.glob(f"{ch}*.tif")
         }
 
-        translation = multiview_phase_cross_corr(
-            **views, camera_1_flip=True, to_device=cp.asarray
-        )
-        cp.clear_memo()
+        with unified_memory():
+            translation = multiview_phase_cross_corr(
+                **views, camera_1_flip=True, to_device=cp.asarray
+            )
 
-        views = {k: cp.asarray(v) for k, v in views.items()}
-        fused = multiview_fuse(
-            **views, camera_1_translation=translation, camera_1_flip=True
-        )
-        cp.clear_memo()
+            fused = multiview_fuse(
+                **views,
+                camera_1_translation=translation,
+                camera_1_flip=True,
+                to_device=cp.asarray,
+            )
 
         if interactive:
             for name, arr in views.items():

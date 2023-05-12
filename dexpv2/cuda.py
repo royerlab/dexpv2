@@ -1,6 +1,8 @@
 import importlib
 import logging
+from contextlib import contextmanager
 from types import ModuleType
+from typing import Generator
 
 import torch as th
 
@@ -22,14 +24,23 @@ CUPY_MODULES = {
 }
 
 
-def setup_unified_memory() -> None:
+@contextmanager
+def unified_memory() -> Generator:
     """
     Initializes cupy's unified memory allocation.
     cupy's functions will run slower but it will spill memory memory into cpu without crashing.
     """
-    if cp is None:
-        return
-    cp.cuda.set_allocator(malloc_managed)
+    # starts unified memory
+    if cp is not None:
+        previous_allocator = cp.cuda.get_allocator()
+        cp.cuda.set_allocator(malloc_managed)
+
+    yield
+
+    # ends unified memory
+    if cp is not None:
+        cp.clear_memo()
+        cp.cuda.set_allocator(previous_allocator)
 
 
 def torch_default_device() -> th.device:
