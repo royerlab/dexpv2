@@ -49,6 +49,7 @@ def detect_foreground(
     voxel_size: ArrayLike,
     sigma: float = 15.0,
     remove_hist_mode: bool = False,
+    min_foreground: float = 0.0,
 ) -> ArrayLike:
     """
     Detect foreground using morphological reconstruction by dilation and thresholding.
@@ -61,8 +62,10 @@ def detect_foreground(
         Array of voxel size (z, y, x).
     sigma : float, optional
         Sigma used to estimate background, it will be divided by voxel size, by default 15.0
-    remove_hist_mode: bool, optional
+    remove_hist_mode : bool, optional
         Removes histogram mode before computing otsu threshold, useful when background regions are being detected.
+    min_foreground : float, optional
+        Minimum value of foreground pixels after background subtraction and smoothing, by default 0.0
 
     Returns
     -------
@@ -111,6 +114,9 @@ def detect_foreground(
     del small_foreground
     threshold = np.square(filters.threshold_otsu(hist=(hist, bin_centers)))
     LOG.info(f"Threshold {threshold}")
+
+    threshold = max(threshold, min_foreground)
+    LOG.info(f"Threshold after minimum filtering {threshold}")
 
     mask = foreground > threshold
     del foreground
