@@ -54,6 +54,16 @@ def identity_grid(shape: tuple[int, ...]) -> th.Tensor:
     return F.affine_grid(T, grid_shape, align_corners=False)
 
 
+def _interpolate_grid(grid: th.Tensor, *args, **kwargs) -> th.Tensor:
+    return th.stack(
+        [
+            _interpolate(grid[None, ..., d], *args, **kwargs)[0]
+            for d in range(grid.shape[-1])
+        ],
+        dim=-1,
+    )[0]
+
+
 def flow_field(
     source: th.Tensor,
     target: th.Tensor,
@@ -61,6 +71,7 @@ def flow_field(
     grid_factor: int = 4,
     num_iterations: int = 2000,
     lr: float = 1e-4,
+    n_scales: int = 2,
 ) -> th.Tensor:
     """
     Compute the flow vector field `T` that minimizes the
@@ -81,6 +92,8 @@ def flow_field(
         Number of gradient descent iterations, by default 2000.
     lr : float, optional
         Learning rate (gradient descent step), by default 1e-4
+    n_scales : int, optional
+        Number of scales used for multi-scale optimization, by default 2.
 
     Returns
     -------
@@ -98,55 +111,52 @@ def flow_field(
     device = source.device
     kwargs = dict(device=device, requires_grad=False)
 
-    source = _interpolate(source, scale_factor=1 / im_factor)
-    target = _interpolate(target, scale_factor=1 / im_factor)
+    LOG.info(f"image factor: {im_factor}")
+    LOG.info(f"grid factor: {grid_factor}")
 
-    LOG.info(f"source / target shape: {source.shape}")
+    scales = np.power(2, np.arange(n_scales))
+    grid = None
 
-    grid_shape = tuple(m.ceil(s / grid_factor) for s in source.shape[-3:])
-    grid0 = identity_grid(grid_shape).to(device)
+    for scale in range(scales):
 
-    grid = grid0.detach()
-    grid.requires_grad_(True).retain_grad()
+        scaled_im_factor = im_factor * scale
+        source = _interpolate(source, scale_factor=1 / scaled_im_factor)
+        target = _interpolate(target, scale_factor=1 / scaled_im_factor)
 
-    LOG.info(f"grid shape: {grid.shape}")
+        if grid is None:
+            grid_shape = tuple(m.ceil(s / grid_factor) for s in source.shape[-3:])
+            grid = identity_grid(grid_shape).to(device)
+        else:
+            grid = _interpolate_grid(grid, scale_factor=2)
 
-    for i in range(num_iterations):
-        if grid.grad is not None:
-            grid.grad.zero_()
+        LOG.info(f"scale: {scale}")
+        LOG.info(f"image shape: {source.shape}")
+        LOG.info(f"grid shape: {grid.shape}")
 
-        large_grid = th.stack(
-            [
-                _interpolate(grid[None, ..., d], source.shape[-3:])[0]
-                for d in range(grid.shape[-1])
-            ],
-            dim=-1,
-        )
+        for i in range(num_iterations):
+            if grid.grad is not None:
+                grid.grad.zero_()
 
-        im2hat = F.grid_sample(target, large_grid, align_corners=False)
-        loss = F.l1_loss(im2hat, source)
-        loss = loss + total_variation_loss(grid - grid0)
-        loss.backward()
+            large_grid = _interpolate_grid(grid, source.shape[-3:])
 
-        LOG.info(f"iter. {i} MSE: {loss:0.4f}")
+            im2hat = F.grid_sample(target, large_grid, align_corners=False)
+            loss = F.l1_loss(im2hat, source)
+            loss = loss + total_variation_loss(grid - grid0)
+            loss.backward()
 
-        grid = grid - lr * grid.grad
-        grid.requires_grad_(True).retain_grad()
+            LOG.info(f"iter. {i} MSE: {loss:0.4f}")
+
+            grid = grid - lr * grid.grad
+            grid.requires_grad_(True).retain_grad()
 
     with th.no_grad():
+        grid0 = identity_grid(grid.shape).to(device)
         grid = grid - grid0
         grid = th.flip(grid, (-1,))  # x, y, z -> z, y, x
 
         # divided by 2.0 because the range is -1 to 1 (length = 2.0)
         grid = grid * im_factor * th.tensor(source.shape[-ndim:], **kwargs) / 2.0
-
-        grid = th.stack(
-            [
-                _interpolate(grid[None, ..., d], source.shape[-3:])[0]
-                for d in range(grid.shape[-1])
-            ],
-            dim=1,
-        )[0]
+        grid = _interpolate_grid(grid, source.shape[-3:])
 
         LOG.info(f"vector field shape: {grid.shape}")
 
