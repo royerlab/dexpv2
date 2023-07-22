@@ -30,7 +30,7 @@ def total_variation_loss(tensor: th.Tensor) -> th.Tensor:
             th.index_select(tensor, i, idx[:-1]) - th.index_select(tensor, i, idx[1:])
         )  # first derivative
 
-        loss = loss + tv.sum()
+        loss = loss + tv.mean()
     return loss
 
 
@@ -81,7 +81,7 @@ def flow_field(
     target: th.Tensor,
     im_factor: int = 4,
     grid_factor: int = 4,
-    num_iterations: int = 2000,
+    num_iterations: int = 1000,
     lr: float = 1e-4,
     n_scales: int = 3,
 ) -> th.Tensor:
@@ -101,11 +101,11 @@ def flow_field(
         Grid space down scaling factor, by default 4.
         Grid dimensions will be divided by both `im_factor` and `grid_factor`.
     num_iterations : int, optional
-        Number of gradient descent iterations, by default 2000.
+        Number of gradient descent iterations, by default 1000.
     lr : float, optional
         Learning rate (gradient descent step), by default 1e-4
     n_scales : int, optional
-        Number of scales used for multi-scale optimization, by default 2.
+        Number of scales used for multi-scale optimization, by default 3.
 
     Returns
     -------
@@ -140,8 +140,7 @@ def flow_field(
                 grid = identity_grid(grid_shape).to(device)
                 grid0 = grid.clone()
             else:
-                grid = _interpolate_grid(2.0 * grid, scale_factor=2)
-                # grid = _interpolate_grid(grid, scale_factor=2)
+                grid = _interpolate_grid(grid, scale_factor=2)
                 grid0 = identity_grid(grid.shape[-4:-1]).to(device)
 
         grid.requires_grad_(True).retain_grad()
@@ -156,15 +155,12 @@ def flow_field(
 
             large_grid = _interpolate_grid(grid, size=scaled_source.shape[-3:])
 
-            im2hat = F.grid_sample(target, large_grid, align_corners=False)
+            im2hat = F.grid_sample(target, large_grid, align_corners=True)
             loss = F.l1_loss(im2hat, scaled_source)
-            # loss = loss + total_variation_loss(grid - grid0)
+            loss = loss + total_variation_loss(grid - grid0)
             loss.backward()
 
             if i % 10 == 0:
-                print("g0", grid0.min(), grid0.max())
-                print("grid", grid.min(), grid.max())
-
                 LOG.info(f"iter. {i} MSE: {loss:0.4f}")
 
             grid = grid - lr * grid.grad
@@ -176,20 +172,12 @@ def flow_field(
 
     with th.no_grad():
         grid = cast(th.Tensor, grid)
-        grid0 = identity_grid(grid.shape[-4:-1]).to(device)
         grid = grid - grid0
         grid = th.flip(grid, (-1,))  # x, y, z -> z, y, x
 
-        LOG.info(f"scaled image shape: {scaled_source.shape}")
-        LOG.info(f"grid shape: {grid.shape}")
-
-        to_image_scaling = th.tensor(scaled_source.shape[-ndim:], **kwargs) / th.tensor(
-            grid.shape[-4:-1], **kwargs
-        )
-        LOG.info(f"to image scaling (grid factor) : {to_image_scaling}")
-
+        # grid is already scaled at the scaled_source space, not grid space.
         # divided by 2.0 because the range is -1 to 1 (length = 2.0)
-        grid = grid * to_image_scaling / 2.0
+        grid = grid * im_factor * th.tensor(scaled_source.shape[-ndim:], **kwargs) / 2.0
         grid = _interpolate_grid(grid, out_dim=1, size=scaled_source.shape[-3:])[0]
 
         LOG.info(f"vector field shape: {grid.shape}")
@@ -220,7 +208,6 @@ def flow_field(
         viewer.add_image(
             grid.detach().cpu().numpy(),
             name="grid",
-            scale=(grid_factor,) * ndim,
             colormap="turbo",
             visible=False,
         )
@@ -255,7 +242,7 @@ def apply_field(field: th.Tensor, image: th.Tensor) -> th.Tensor:
     field = field / shape[:-1] * 2.0  # mapping range from image shape to -1 to 1
     field = identity_grid(field.shape[1:-1]).to(field.device) - field
 
-    transformed_image = F.grid_sample(image[None], field, align_corners=False)
+    transformed_image = F.grid_sample(image[None], field, align_corners=True)
 
     return transformed_image[0]
 
