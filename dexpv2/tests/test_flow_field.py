@@ -9,11 +9,11 @@ def test_flow_field(interactive_test: bool) -> None:
 
     device = torch_default_device()
     intensity = 1_000
-    ndim = 3
-    size = (64,) * ndim
+    size = (64,) * 3  # (56, 65, 72)
     sigma = 15
     im_factor = 2
     grid_factor = 4
+    n_scales = 1
 
     grid = th.stack(
         th.meshgrid([th.arange(s, device=device) for s in size], indexing="ij"), dim=-1
@@ -35,6 +35,7 @@ def test_flow_field(interactive_test: bool) -> None:
         grid_factor=grid_factor,
         num_iterations=2000,
         lr=1e-4,
+        n_scales=n_scales,
     )
 
     fields = th.stack(
@@ -73,4 +74,6 @@ def test_flow_field(interactive_test: bool) -> None:
 
         napari.run()
 
+    print(trajectory)
+    print(mus.float())
     assert th.allclose(trajectory, mus.float(), atol=0.5, rtol=0.0)

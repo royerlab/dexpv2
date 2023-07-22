@@ -1,6 +1,6 @@
 import logging
 import math as m
-from typing import Optional
+from typing import Optional, cast
 
 import numpy as np
 import torch as th
@@ -14,7 +14,7 @@ LOG = logging.getLogger(__name__)
 
 def _interpolate(tensor: th.Tensor, *args, **kwargs) -> th.Tensor:
     mode = "trilinear" if tensor.ndim == 5 else "bilinear"
-    return F.interpolate(tensor, *args, **kwargs, mode=mode, align_corners=False)
+    return F.interpolate(tensor, *args, **kwargs, mode=mode, align_corners=True)
 
 
 def total_variation_loss(tensor: th.Tensor) -> th.Tensor:
@@ -51,17 +51,29 @@ def identity_grid(shape: tuple[int, ...]) -> th.Tensor:
     T = th.zeros((1, ndim, ndim + 1))
     T[:, :, :-1] = th.eye(ndim)
     grid_shape = (1, 1) + shape
-    return F.affine_grid(T, grid_shape, align_corners=False)
+    grid = F.affine_grid(T, grid_shape, align_corners=True)
+    return grid
 
 
-def _interpolate_grid(grid: th.Tensor, *args, **kwargs) -> th.Tensor:
+def _interpolate_grid(grid: th.Tensor, out_dim: int = -1, **kwargs) -> th.Tensor:
+    """Interpolate a grid.
+
+    Parameters
+    ----------
+    grid : th.Tensor
+        Grid tensor of shape (z, y, x, D).
+    out_dim : int, optional
+        Output dimension, by default -1.
+
+    Returns
+    -------
+    th.Tensor
+        Tensor of shape (Z, Y, X, D) when out_dim=1, D position is subject to `out_dim` value.
+    """
     return th.stack(
-        [
-            _interpolate(grid[None, ..., d], *args, **kwargs)[0]
-            for d in range(grid.shape[-1])
-        ],
-        dim=-1,
-    )[0]
+        [_interpolate(grid[None, ..., d], **kwargs)[0] for d in range(grid.shape[-1])],
+        dim=out_dim,
+    )
 
 
 def flow_field(
@@ -71,7 +83,7 @@ def flow_field(
     grid_factor: int = 4,
     num_iterations: int = 2000,
     lr: float = 1e-4,
-    n_scales: int = 2,
+    n_scales: int = 3,
 ) -> th.Tensor:
     """
     Compute the flow vector field `T` that minimizes the
@@ -102,6 +114,7 @@ def flow_field(
     """
     assert source.shape == target.shape
     assert source.ndim == 4
+    assert n_scales > 0
 
     ndim = source.ndim - 1
 
@@ -111,52 +124,73 @@ def flow_field(
     device = source.device
     kwargs = dict(device=device, requires_grad=False)
 
-    LOG.info(f"image factor: {im_factor}")
-    LOG.info(f"grid factor: {grid_factor}")
-
-    scales = np.power(2, np.arange(n_scales))
+    scales = np.flip(np.power(2, np.arange(n_scales)))
     grid = None
 
-    for scale in range(scales):
+    for scale in scales:
+        with th.no_grad():
+            scaled_im_factor = im_factor * scale
+            scaled_source = _interpolate(source, scale_factor=1 / scaled_im_factor)
+            scaled_target = _interpolate(target, scale_factor=1 / scaled_im_factor)
 
-        scaled_im_factor = im_factor * scale
-        source = _interpolate(source, scale_factor=1 / scaled_im_factor)
-        target = _interpolate(target, scale_factor=1 / scaled_im_factor)
+            if grid is None:
+                grid_shape = tuple(
+                    m.ceil(s / grid_factor) for s in scaled_source.shape[-3:]
+                )
+                grid = identity_grid(grid_shape).to(device)
+                grid0 = grid.clone()
+            else:
+                grid = _interpolate_grid(2.0 * grid, scale_factor=2)
+                # grid = _interpolate_grid(grid, scale_factor=2)
+                grid0 = identity_grid(grid.shape[-4:-1]).to(device)
 
-        if grid is None:
-            grid_shape = tuple(m.ceil(s / grid_factor) for s in source.shape[-3:])
-            grid = identity_grid(grid_shape).to(device)
-        else:
-            grid = _interpolate_grid(grid, scale_factor=2)
+        grid.requires_grad_(True).retain_grad()
 
         LOG.info(f"scale: {scale}")
-        LOG.info(f"image shape: {source.shape}")
+        LOG.info(f"image shape: {scaled_source.shape}")
         LOG.info(f"grid shape: {grid.shape}")
 
         for i in range(num_iterations):
             if grid.grad is not None:
                 grid.grad.zero_()
 
-            large_grid = _interpolate_grid(grid, source.shape[-3:])
+            large_grid = _interpolate_grid(grid, size=scaled_source.shape[-3:])
 
             im2hat = F.grid_sample(target, large_grid, align_corners=False)
-            loss = F.l1_loss(im2hat, source)
-            loss = loss + total_variation_loss(grid - grid0)
+            loss = F.l1_loss(im2hat, scaled_source)
+            # loss = loss + total_variation_loss(grid - grid0)
             loss.backward()
 
-            LOG.info(f"iter. {i} MSE: {loss:0.4f}")
+            if i % 10 == 0:
+                print("g0", grid0.min(), grid0.max())
+                print("grid", grid.min(), grid.max())
+
+                LOG.info(f"iter. {i} MSE: {loss:0.4f}")
 
             grid = grid - lr * grid.grad
             grid.requires_grad_(True).retain_grad()
 
+    LOG.info(f"image size: {source.shape}")
+    LOG.info(f"image factor: {im_factor}")
+    LOG.info(f"grid factor: {grid_factor}")
+
     with th.no_grad():
-        grid0 = identity_grid(grid.shape).to(device)
+        grid = cast(th.Tensor, grid)
+        grid0 = identity_grid(grid.shape[-4:-1]).to(device)
         grid = grid - grid0
         grid = th.flip(grid, (-1,))  # x, y, z -> z, y, x
 
+        LOG.info(f"scaled image shape: {scaled_source.shape}")
+        LOG.info(f"grid shape: {grid.shape}")
+
+        to_image_scaling = th.tensor(scaled_source.shape[-ndim:], **kwargs) / th.tensor(
+            grid.shape[-4:-1], **kwargs
+        )
+        LOG.info(f"to image scaling (grid factor) : {to_image_scaling}")
+
         # divided by 2.0 because the range is -1 to 1 (length = 2.0)
-        grid = grid * im_factor * th.tensor(source.shape[-ndim:], **kwargs) / 2.0
-        grid = _interpolate_grid(grid, source.shape[-3:])
+        grid = grid * to_image_scaling / 2.0
+        grid = _interpolate_grid(grid, out_dim=1, size=scaled_source.shape[-3:])[0]
 
         LOG.info(f"vector field shape: {grid.shape}")
 
@@ -165,10 +199,17 @@ def flow_field(
 
         viewer = napari.Viewer()
         viewer.add_image(
-            source.cpu().numpy(), name="im1", blending="additive", colormap="blue"
+            scaled_source.cpu().numpy(),
+            name="im1",
+            blending="additive",
+            colormap="blue",
+            visible=False,
         )
         viewer.add_image(
-            target.cpu().numpy(), name="im2", blending="additive", colormap="green"
+            scaled_target.cpu().numpy(),
+            name="im2",
+            blending="additive",
+            colormap="green",
         )
         viewer.add_image(
             im2hat.detach().cpu().numpy(),
@@ -181,6 +222,7 @@ def flow_field(
             name="grid",
             scale=(grid_factor,) * ndim,
             colormap="turbo",
+            visible=False,
         )
         napari.run()
 
