@@ -159,8 +159,8 @@ def flow_field(
             if i % 10 == 0:
                 LOG.info(f"iter. {i} MSE: {loss:0.4f}")
 
-            grid = grid - lr * grid.grad
-            grid.requires_grad_(True).retain_grad()
+            with th.no_grad():
+                grid -= lr * grid.grad
 
     LOG.info(f"image size: {source.shape}")
     LOG.info(f"image factor: {im_factor}")
