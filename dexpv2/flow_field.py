@@ -116,14 +116,10 @@ def flow_field(
     assert source.ndim == 4
     assert n_scales > 0
 
-    ndim = source.ndim - 1
-
     source = source.unsqueeze(0)
     target = target.unsqueeze(0)
 
     device = source.device
-    kwargs = dict(device=device, requires_grad=False)
-
     scales = np.flip(np.power(2, np.arange(n_scales)))
     grid = None
 
@@ -175,9 +171,8 @@ def flow_field(
         grid = grid - grid0
         grid = th.flip(grid, (-1,))  # x, y, z -> z, y, x
 
-        # grid is already scaled at the scaled_source space, not grid space.
         # divided by 2.0 because the range is -1 to 1 (length = 2.0)
-        grid = grid * im_factor * th.tensor(scaled_source.shape[-ndim:], **kwargs) / 2.0
+        grid /= 2.0
         grid = _interpolate_grid(grid, out_dim=1, size=scaled_source.shape[-3:])[0]
 
         LOG.info(f"vector field shape: {grid.shape}")
@@ -216,6 +211,7 @@ def flow_field(
     return grid
 
 
+@th.no_grad()
 def apply_field(field: th.Tensor, image: th.Tensor) -> th.Tensor:
     """
     Transform image using vector field.
@@ -238,8 +234,7 @@ def apply_field(field: th.Tensor, image: th.Tensor) -> th.Tensor:
     field = th.flip(field, (0,))  # z, y, x -> x, y, z
     field = field.movedim(0, -1)[None]
 
-    shape = th.tensor(image.shape[::-1], device=field.device)
-    field = field / shape[:-1] * 2.0  # mapping range from image shape to -1 to 1
+    field = field * 2.0  # mapping range from image shape to -1 to 1
     field = identity_grid(field.shape[1:-1]).to(field.device) - field
 
     transformed_image = F.grid_sample(image[None], field, align_corners=True)
@@ -247,6 +242,7 @@ def apply_field(field: th.Tensor, image: th.Tensor) -> th.Tensor:
     return transformed_image[0]
 
 
+@th.no_grad()
 def advenct_field(
     field: ArrayLike,
     sources: th.Tensor,
@@ -299,10 +295,12 @@ def advenct_field(
         )
         idx = (slice(None), *spatial_idx)
 
+        movement = current[idx].T * orig_shape
+
         if invert:
-            sources = sources - current[idx].T
+            sources = sources - movement
         else:
-            sources = sources + current[idx].T
+            sources = sources + movement
 
         trajectories.append(sources)
 
