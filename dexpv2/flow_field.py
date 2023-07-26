@@ -8,13 +8,57 @@ import torch.nn.functional as F
 from numpy.typing import ArrayLike
 
 from dexpv2.constants import DEXPV2_DEBUG
+from dexpv2.cuda import import_module
 
 LOG = logging.getLogger(__name__)
 
+try:
+    import cupy as xp
 
-def _interpolate(tensor: th.Tensor, *args, **kwargs) -> th.Tensor:
+    LOG.info("cupy found.")
+
+except (ModuleNotFoundError, ImportError):
+    import numpy as xp
+
+    LOG.info("cupy not found using numpy and scipy.")
+
+
+def _interpolate(tensor: th.Tensor, antialias: bool = False, **kwargs) -> th.Tensor:
+    """Interpolates tensor.
+
+    Parameters
+    ----------
+    tensor : th.Tensor
+        Input 4 or 5-dim tensor.
+    antialias : bool, optional
+        When true applies a gaussian filter with 0.5 * downscale factor.
+        Ignored if upscaling.
+
+    Returns
+    -------
+    th.Tensor
+        Interpolated tensor.
+    """
     mode = "trilinear" if tensor.ndim == 5 else "bilinear"
-    return F.interpolate(tensor, *args, **kwargs, mode=mode, align_corners=True)
+    if antialias:
+        scale_factor = kwargs.get("scale_factor")
+        if scale_factor is None:
+            raise ValueError(
+                "`_interpolate` with `antialias=True` requires `scale_factor` parameter."
+            )
+
+        if scale_factor < 1.0:
+            ndi = import_module("scipy", "ndimage")
+            array = xp.asarray(tensor)
+            blurred = ndi.gaussian_filter(
+                array,
+                sigma=0.5 / scale_factor,
+                output=array,
+            )
+            tensor = th.as_tensor(blurred, device=tensor.device)
+            LOG.info(f"Antialiasing with sigma = {0.5 / scale_factor}.")
+
+    return F.interpolate(tensor, **kwargs, mode=mode, align_corners=True)
 
 
 def total_variation_loss(tensor: th.Tensor) -> th.Tensor:
@@ -126,8 +170,12 @@ def flow_field(
     for scale in scales:
         with th.no_grad():
             scaled_im_factor = im_factor * scale
-            scaled_source = _interpolate(source, scale_factor=1 / scaled_im_factor)
-            scaled_target = _interpolate(target, scale_factor=1 / scaled_im_factor)
+            scaled_source = _interpolate(
+                source, scale_factor=1 / scaled_im_factor, antialias=True
+            )
+            scaled_target = _interpolate(
+                target, scale_factor=1 / scaled_im_factor, antialias=True
+            )
 
             if grid is None:
                 grid_shape = tuple(
