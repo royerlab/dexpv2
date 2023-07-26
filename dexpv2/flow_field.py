@@ -49,13 +49,15 @@ def _interpolate(tensor: th.Tensor, antialias: bool = False, **kwargs) -> th.Ten
 
         if scale_factor < 1.0:
             ndi = import_module("scipy", "ndimage")
-            array = xp.asarray(tensor)
+            orig_shape = tensor.shape
+            array = xp.asarray(tensor.squeeze())
             blurred = ndi.gaussian_filter(
                 array,
                 sigma=0.5 / scale_factor,
                 output=array,
             )
             tensor = th.as_tensor(blurred, device=tensor.device)
+            tensor = tensor.reshape(orig_shape)
             LOG.info(f"Antialiasing with sigma = {0.5 / scale_factor}.")
 
     return F.interpolate(tensor, **kwargs, mode=mode, align_corners=True)
