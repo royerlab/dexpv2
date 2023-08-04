@@ -44,7 +44,9 @@ def log_level_option() -> Callable:
             "--log-level",
             "-log",
             default="WARNING",
+            show_default=True,
             help="Set log level",
+            type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]),
             callback=_set_log_level_callback,
         )(f)
 
