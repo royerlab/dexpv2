@@ -55,7 +55,7 @@ def get_deskewed_data_shape(
     return output_shape, voxel_size
 
 
-def deskew_data(
+def deskew(
     raw_data: ArrayLike,
     px_to_scan_ratio: float,
     ls_angle_deg: float,
@@ -63,7 +63,7 @@ def deskew_data(
     order: int = 1,
     cval: float | None = None,
 ) -> ArrayLike:
-    """Deskews fluorescence data from the mantis microscope
+    """Deskews fluorescence data from the mantis (and DaXi) microscope
 
     Parameters
     ----------
@@ -107,6 +107,8 @@ def deskew_data(
     Z_shift = 0
     if not keep_overhang:
         Z_shift = int(np.floor(Y * ct * px_to_scan_ratio))
+
+    print(-px_to_scan_ratio * ct)
 
     matrix = np.asarray(
         [
