@@ -7,3 +7,9 @@
 [![codecov](https://codecov.io/gh/royerlab/dexpv2/branch/main/graph/badge.svg)](https://codecov.io/gh/royerlab/dexpv2)
 
 Image processing library for large microscopy images.
+
+# Installation
+
+```
+pip install git+https://github.com/royerlab/dexpv2.git
+```

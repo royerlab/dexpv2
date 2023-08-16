@@ -4,7 +4,9 @@ from contextlib import contextmanager
 from types import ModuleType
 from typing import Generator
 
+import numpy as np
 import torch as th
+from numpy.typing import ArrayLike
 
 LOG = logging.getLogger(__name__)
 
@@ -88,3 +90,18 @@ def import_module(module: str, submodule: str) -> ModuleType:
         LOG.info(f"{cupy_module_name} not found. Using cpu equivalent")
 
     return pkg
+
+
+def to_numpy(arr: ArrayLike) -> ArrayLike:
+    """Moves array to cpu and converts to numpy, if it's already there nothing is done."""
+
+    if isinstance(arr, th.Tensor):
+        arr = arr.cpu().numpy()
+
+    elif cp is not None and isinstance(arr, cp.ndarray):
+        arr = arr.get()
+
+    else:
+        arr = np.asarray(arr)
+
+    return arr
