@@ -49,7 +49,8 @@ def get_deskewed_shape(
     tuple
         The new shape after deskewing.
     """
-    assert len(shape) == 3
+    if len(shape) != 3:
+        raise ValueError(f"The shape must be 3D. Got {shape}.")
 
     offset = int(math.fabs(shift) * shape[0] + 0.5)
 
