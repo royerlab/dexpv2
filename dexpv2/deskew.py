@@ -51,11 +51,12 @@ def get_deskewed_shape(
     """
     assert len(shape) == 3
 
-    shape = list(shape)
     offset = int(math.fabs(shift) * shape[0] + 0.5)
-    shape[-1] += offset
 
-    return tuple(shape)
+    shape_list = list(shape)
+    shape_list[-1] += offset
+
+    return tuple(shape_list)
 
 
 def deskew(
