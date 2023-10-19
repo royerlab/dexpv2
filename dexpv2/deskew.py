@@ -1,6 +1,6 @@
 import math
-import numpy as np
 
+import numpy as np
 from numpy.typing import ArrayLike
 from tqdm import tqdm
 
@@ -93,8 +93,7 @@ def deskew(
     for z in tqdm(range(new_shape[0])):
         current_shift = int(math.floor(z * shift)) + offset
         out_data[z, :, current_shift : current_shift + x_length] = (
-            w1 * raw_data[z, :, :-1] +
-            w2 * raw_data[z, :, 1:]
+            w1 * raw_data[z, :, :-1] + w2 * raw_data[z, :, 1:]
         )
 
     return out_data
