@@ -13,6 +13,15 @@ def deskewing_shift(
     """
     Calculate the shift required for deskewing.
 
+    TILT AXIS (z_step)
+        /
+       /
+      /
+     /
+    / o ANGLE
+    -------------
+      SCAN AXIS (x_res)
+
     Parameters
     ----------
     angle : float
@@ -28,6 +37,28 @@ def deskewing_shift(
         The calculated shift.
     """
     return np.cos(np.deg2rad(angle)) * z_step / x_res
+
+
+def deskewed_length(
+    angle: float,
+    z_step: float,
+) -> float:
+    """
+    Calculate the length of the deskewed image (z-axis) opposite to angle.
+
+    Parameters
+    ----------
+    angle : float
+        The angle in degrees to be deskewed.
+    z_step : float
+        The z-step size.
+
+    Returns
+    -------
+    float
+        The calculated length.
+    """
+    return np.sin(np.deg2rad(angle)) * z_step
 
 
 def get_deskewed_shape(
