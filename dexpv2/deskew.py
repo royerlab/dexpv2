@@ -7,41 +7,41 @@ from tqdm import tqdm
 
 def deskewing_shift(
     angle: float,
-    z_step: float,
-    x_res: float,
+    scan_step: float,
+    pixel_size: float,
 ) -> float:
     """
     Calculate the shift required for deskewing.
 
-    TILT AXIS (z_step)
+    TILT AXIS
         /
        /
       /
      /
     / o ANGLE
     -------------
-      SCAN AXIS (x_res)
+      SCAN AXIS
 
     Parameters
     ----------
     angle : float
         The angle in degrees to be deskewed.
-    z_step : float
-        The z-step size.
-    x_res : float
-        The x-axis resolution in the units as `z_step`.
+    scan_step : float
+        The scan step size along tile axis.
+    pixel_size : float
+        The pixel size (resolution).
 
     Returns
     -------
     float
         The calculated shift.
     """
-    return np.cos(np.deg2rad(angle)) * x_res / z_step
+    return np.cos(np.deg2rad(angle)) * pixel_size / scan_step
 
 
 def deskewed_dimension(
     angle: float,
-    z_step: float,
+    scan_step: float,
 ) -> float:
     """
     Calculate the length of the deskewed image (z-axis) opposite to angle.
@@ -50,15 +50,15 @@ def deskewed_dimension(
     ----------
     angle : float
         The angle in degrees to be deskewed.
-    z_step : float
-        The z-step size.
+    scan_step : float
+        The scan_step size.
 
     Returns
     -------
     float
         The calculated length.
     """
-    return np.sin(np.deg2rad(angle)) * z_step
+    return np.sin(np.deg2rad(angle)) * scan_step
 
 
 def get_deskewed_shape(
@@ -97,6 +97,7 @@ def deskew(
 ) -> ArrayLike:
     """
     Perform the deskewing operation on the raw data.
+    Skewing is performed along the xz-slice.
 
     Parameters
     ----------
