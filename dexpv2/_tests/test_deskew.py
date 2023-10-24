@@ -10,6 +10,7 @@ def test_skew_deskew(interactive_test: bool):
     # Load the example nuclei image from skimage and keep only one channel
     angle = 45
     image = data.cells3d()[:, 1, :, :]
+
     image_shape = image.shape
 
     # Create an affine transform for skewing
@@ -30,7 +31,12 @@ def test_skew_deskew(interactive_test: bool):
 
         viewer = napari.Viewer()
         viewer.add_image(image, colormap="red", blending="additive")
+        viewer.add_image(skewed_image, colormap="blue", blending="additive")
         viewer.add_image(deskewed_image, colormap="green", blending="additive")
+
+        viewer.axes.visible = True
+        viewer.dims.ndisplay = 3
+        viewer.camera.angles = (0, 0, 0)
 
         napari.run()
 

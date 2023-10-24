@@ -36,10 +36,10 @@ def deskewing_shift(
     float
         The calculated shift.
     """
-    return np.cos(np.deg2rad(angle)) * z_step / x_res
+    return np.cos(np.deg2rad(angle)) * x_res / z_step
 
 
-def deskewed_length(
+def deskewed_dimension(
     angle: float,
     z_step: float,
 ) -> float:
