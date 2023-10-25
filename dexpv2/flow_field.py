@@ -1,66 +1,15 @@
 import logging
 import math as m
-from typing import Optional, cast
+from typing import Optional
 
 import numpy as np
 import torch as th
 import torch.nn.functional as F
 from numpy.typing import ArrayLike
 
-from dexpv2.constants import DEXPV2_DEBUG
-from dexpv2.cuda import import_module
+from dexpv2.registration import Registration, _interpolate
 
 LOG = logging.getLogger(__name__)
-
-try:
-    import cupy as xp
-
-    LOG.info("cupy found.")
-
-except (ModuleNotFoundError, ImportError):
-    import numpy as xp
-
-    LOG.info("cupy not found using numpy and scipy.")
-
-
-def _interpolate(tensor: th.Tensor, antialias: bool = False, **kwargs) -> th.Tensor:
-    """Interpolates tensor.
-
-    Parameters
-    ----------
-    tensor : th.Tensor
-        Input 4 or 5-dim tensor.
-    antialias : bool, optional
-        When true applies a gaussian filter with 0.5 * downscale factor.
-        Ignored if upscaling.
-
-    Returns
-    -------
-    th.Tensor
-        Interpolated tensor.
-    """
-    mode = "trilinear" if tensor.ndim == 5 else "bilinear"
-    if antialias:
-        scale_factor = kwargs.get("scale_factor")
-        if scale_factor is None:
-            raise ValueError(
-                "`_interpolate` with `antialias=True` requires `scale_factor` parameter."
-            )
-
-        if scale_factor < 1.0:
-            ndi = import_module("scipy", "ndimage")
-            orig_shape = tensor.shape
-            array = xp.asarray(tensor.squeeze())
-            blurred = ndi.gaussian_filter(
-                array,
-                sigma=0.5 / scale_factor,
-                output=array,
-            )
-            tensor = th.as_tensor(blurred, device=tensor.device)
-            tensor = tensor.reshape(orig_shape)
-            LOG.info(f"Antialiasing with sigma = {0.5 / scale_factor}.")
-
-    return F.interpolate(tensor, **kwargs, mode=mode, align_corners=True)
 
 
 def total_variation_loss(tensor: th.Tensor) -> th.Tensor:
@@ -122,143 +71,72 @@ def _interpolate_grid(grid: th.Tensor, out_dim: int = -1, **kwargs) -> th.Tensor
     )
 
 
-def flow_field(
-    source: th.Tensor,
-    target: th.Tensor,
-    im_factor: int = 4,
-    grid_factor: int = 4,
-    num_iterations: int = 1000,
-    lr: float = 1e-4,
-    n_scales: int = 3,
-) -> th.Tensor:
-    """
-    Compute the flow vector field `T` that minimizes the
-    mean squared error between `T(source)` and `target`.
+class FlowFieldRegistration(Registration):
+    def zero_grad(self) -> None:
+        # TODO
+        if self.grid.grad is not None:
+            self.grid.grad.zero_()
 
-    Parameters
-    ----------
-    source : torch.Tensor
-        Source image (C, Z, Y, X).
-    target : torch.Tensor
-        Target image (C, Z, Y, X).
-    im_factor : int, optional
-        Image space down scaling factor, by default 4.
-    grid_factor : int, optional
-        Grid space down scaling factor, by default 4.
-        Grid dimensions will be divided by both `im_factor` and `grid_factor`.
-    num_iterations : int, optional
-        Number of gradient descent iterations, by default 1000.
-    lr : float, optional
-        Learning rate (gradient descent step), by default 1e-4
-    n_scales : int, optional
-        Number of scales used for multi-scale optimization, by default 3.
-
-    Returns
-    -------
-    torch.Tensor
-        Vector field array with shape (D, (Z / factor), Y / factor, X / factor)
-    """
-    assert source.shape == target.shape
-    assert source.ndim == 4
-    assert n_scales > 0
-
-    source = source.unsqueeze(0)
-    target = target.unsqueeze(0)
-
-    device = source.device
-    scales = np.flip(np.power(2, np.arange(n_scales)))
-    grid = None
-
-    for scale in scales:
+    def grad_step(self) -> None:
+        # TODO
         with th.no_grad():
-            scaled_im_factor = im_factor * scale
-            scaled_source = _interpolate(
-                source, scale_factor=1 / scaled_im_factor, antialias=True
-            )
-            scaled_target = _interpolate(
-                target, scale_factor=1 / scaled_im_factor, antialias=True
-            )
+            self.grid -= self.lr * self.grid.grad
 
-            if grid is None:
+    def setup_params(self, reference_tensor: th.Tensor) -> None:
+        # TODO
+        with th.no_grad():
+            if not hasattr(self, "grid"):
                 grid_shape = tuple(
-                    m.ceil(s / grid_factor) for s in scaled_source.shape[-3:]
+                    m.ceil(s / self.grid_factor) for s in reference_tensor.shape[-3:]
                 )
-                grid = identity_grid(grid_shape).to(device)
-                grid0 = grid.clone()
+                self.grid = identity_grid(grid_shape).to(reference_tensor.device)
+                self.grid0 = self.grid.clone()
             else:
-                grid = _interpolate_grid(grid, scale_factor=2)
-                grid0 = identity_grid(grid.shape[-4:-1]).to(device)
+                self.grid = _interpolate_grid(self.grid, scale_factor=2)
+                self.grid0 = identity_grid(self.grid.shape[-4:-1]).to(
+                    reference_tensor.device
+                )
 
-        grid.requires_grad_(True).retain_grad()
+        self.reference_shape = reference_tensor.shape
 
-        LOG.info(f"scale: {scale}")
-        LOG.info(f"image shape: {scaled_source.shape}")
-        LOG.info(f"grid shape: {grid.shape}")
+        self.grid.requires_grad_(True).retain_grad()
 
-        for i in range(num_iterations):
-            if grid.grad is not None:
-                grid.grad.zero_()
+    def regularization_loss(self) -> th.Tensor | float:
+        # TODO
+        return total_variation_loss(self.grid - self.grid0)
 
-            large_grid = _interpolate_grid(grid, size=scaled_source.shape[-3:])
+    def apply(self, tensor: th.Tensor) -> th.Tensor:
+        # TODO
+        large_grid = _interpolate_grid(self.grid, size=self.reference_shape[-3:])
+        return F.grid_sample(tensor, large_grid, align_corners=True)
 
-            im2hat = F.grid_sample(target, large_grid, align_corners=True)
-            loss = F.l1_loss(im2hat, scaled_source)
-            loss = loss + total_variation_loss(grid - grid0)
-            loss.backward()
+    def formated_grid(self) -> th.Tensor:
 
-            if i % 10 == 0:
-                LOG.info(f"iter. {i} MSE: {loss:0.4f}")
+        # TODO
+        """_summary_
 
-            with th.no_grad():
-                grid -= lr * grid.grad
 
-    LOG.info(f"image size: {source.shape}")
-    LOG.info(f"image factor: {im_factor}")
-    LOG.info(f"grid factor: {grid_factor}")
+        Returns
+        -------
+        torch.Tensor
+            Vector field array with shape (D, (Z / factor), Y / factor, X / factor)
+        """
+        with th.no_grad():
+            grid = self.grid - self.grid0
+            grid = th.flip(grid, (-1,))  # x, y, z -> z, y, x
 
-    with th.no_grad():
-        grid = cast(th.Tensor, grid)
-        grid = grid - grid0
-        grid = th.flip(grid, (-1,))  # x, y, z -> z, y, x
+            # divided by 2.0 because the range is -1 to 1 (length = 2.0)
+            grid /= 2.0
+            grid = _interpolate_grid(grid, out_dim=1, size=self.reference_shape[-3:])[0]
 
-        # divided by 2.0 because the range is -1 to 1 (length = 2.0)
-        grid /= 2.0
-        grid = _interpolate_grid(grid, out_dim=1, size=scaled_source.shape[-3:])[0]
+            LOG.info(f"vector field shape: {grid.shape}")
+            return grid.cpu()
 
-        LOG.info(f"vector field shape: {grid.shape}")
-
-    if DEXPV2_DEBUG:
-        import napari
-
-        viewer = napari.Viewer()
-        viewer.add_image(
-            scaled_source.cpu().numpy(),
-            name="im1",
-            blending="additive",
-            colormap="blue",
-            visible=False,
-        )
-        viewer.add_image(
-            scaled_target.cpu().numpy(),
-            name="im2",
-            blending="additive",
-            colormap="green",
-        )
-        viewer.add_image(
-            im2hat.detach().cpu().numpy(),
-            name="im2hat",
-            blending="additive",
-            colormap="red",
-        )
-        viewer.add_image(
-            grid.detach().cpu().numpy(),
-            name="grid",
-            colormap="turbo",
-            visible=False,
-        )
-        napari.run()
-
-    return grid
+    def reset(self) -> None:
+        # TODO
+        if hasattr(self, "grid"):
+            del self.grid
+            del self.grid0
 
 
 @th.no_grad()

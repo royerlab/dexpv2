@@ -1,11 +1,21 @@
+from typing import Type
+
+import pytest
 import torch as th
-from toolz import curry
 
 from dexpv2.cuda import torch_default_device
-from dexpv2.flow_field import advenct_field, flow_field, to_tracks
+from dexpv2.flow_field import FlowFieldRegistration, advenct_field, to_tracks
+from dexpv2.registration import AffineRegistration, Registration
 
 
-def test_flow_field(interactive_test: bool) -> None:
+@pytest.mark.parametrize(
+    "registration_class",
+    [AffineRegistration, FlowFieldRegistration],
+)
+def test_flow_field(
+    registration_class: Type[Registration],
+    interactive_test: bool,
+) -> None:
 
     device = torch_default_device()
     intensity = 1_000
@@ -29,21 +39,16 @@ def test_flow_field(interactive_test: bool) -> None:
         [intensity * th.exp(-th.square(grid - mu).sum(dim=-1) / sigma) for mu in mus]
     )
 
-    _flow_field = curry(
-        flow_field,
-        im_factor=im_factor,
-        grid_factor=grid_factor,
-        num_iterations=500,
-        lr=1e-4,
-        n_scales=n_scales,
-    )
-
-    fields = th.stack(
-        [
-            _flow_field(frames[i - 1, None], frames[i, None])
-            for i in range(1, len(frames))
-        ]
-    )
+    reg_models = [
+        registration_class(
+            im_factor=im_factor,
+            grid_factor=grid_factor,
+            num_iterations=500,
+            lr=1e-4,
+            n_scales=n_scales,
+        ).fit(frames[i - 1, None], frames[i, None])
+        for i in range(1, len(frames))
+    ]
 
     trajectory = advenct_field(fields, mus[None, 0], size)
     tracks = to_tracks(trajectory)
@@ -54,23 +59,8 @@ def test_flow_field(interactive_test: bool) -> None:
         kwargs = {"blending": "additive", "interpolation3d": "nearest", "rgb": False}
 
         viewer_1 = napari.Viewer()
-        # viewer.add_image(fields.cpu().numpy(), colormap="turbo", scale=(2, 2, 2))
         viewer_1.add_image(frames.cpu().numpy(), **kwargs)
         viewer_1.add_tracks(tracks)
-
-        viewer_2 = napari.Viewer()
-        viewer_2.add_image(
-            th.clamp_min(fields, 0).cpu().numpy(),
-            colormap="red",
-            scale=(im_factor,) * 3,
-            **kwargs,
-        )
-        viewer_2.add_image(
-            th.clamp_min(-fields, 0).cpu().numpy(),
-            colormap="blue",
-            scale=(im_factor,) * 3,
-            **kwargs,
-        )
 
         napari.run()
 
