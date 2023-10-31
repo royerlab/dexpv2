@@ -7,8 +7,6 @@ import numpy as np
 from ants import registration
 from numpy.typing import ArrayLike
 
-logging.basicConfig(level=logging.INFO)
-
 LOG = logging.getLogger(__name__)
 
 
