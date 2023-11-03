@@ -14,7 +14,7 @@ def estimate_affine_transform(
     fixed: np.ndarray,
     moving: np.ndarray,
     voxel_size: ArrayLike,
-    reg_px_size: int,
+    reg_px_size: Optional[int] = None,
     return_reg_moving: bool = False,
     output_path: Optional[Path] = None,
     verbose: bool = False,
@@ -60,14 +60,19 @@ def estimate_affine_transform(
     ants_fixed = ants.from_numpy(fixed.astype(np.float32), spacing=tuple(voxel_size))
     ants_moving = ants.from_numpy(moving.astype(np.float32), spacing=tuple(voxel_size))
 
-    small_ants_fixed = ants.resample_image(ants_fixed, (reg_px_size,) * ndim)
-    small_ants_moving = ants.resample_image(ants_moving, (reg_px_size,) * ndim)
-    LOG.info(f"Resampled shape: {small_ants_fixed.shape}")
+    if reg_px_size is None:
+        resampled_ants_fixed = ants_fixed
+        resampled_ants_moving = ants_moving
+    else:
+        resampled_ants_fixed = ants.resample_image(ants_fixed, (reg_px_size,) * ndim)
+        resampled_ants_moving = ants.resample_image(ants_moving, (reg_px_size,) * ndim)
+
+    LOG.info(f"Resampled shape: {resampled_ants_fixed.shape}")
 
     LOG.info("Starting registration ...")
     result = registration(
-        small_ants_fixed,
-        small_ants_moving,
+        resampled_ants_fixed,
+        resampled_ants_moving,
         type_of_transform="Rigid",
         verbose=verbose,
         **kwargs,
