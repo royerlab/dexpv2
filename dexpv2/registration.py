@@ -7,6 +7,8 @@ import numpy as np
 from ants import registration
 from numpy.typing import ArrayLike
 
+from dexpv2.cuda import import_module
+
 logging.basicConfig(level=logging.INFO)
 
 LOG = logging.getLogger(__name__)
@@ -96,10 +98,12 @@ def estimate_affine_transform(
 def apply_affine_transform(
     transform: ants.ANTsTransform,
     image: np.ndarray,
-    voxel_size: ArrayLike,
+    voxel_size: Optional[ArrayLike],
 ) -> np.ndarray:
     """
     Apply an affine transformation to a 3D image.
+
+    Modified from Ed's mantin's code.
 
     Parameters
     ----------
@@ -119,6 +123,27 @@ def apply_affine_transform(
     -------
     >>> transformed_img = apply_affine_transform(affine_transform, input_img, voxel_size=(1, 1, 1))
     """
-    ants_image = ants.from_numpy(image.astype(np.float32), spacing=tuple(voxel_size))
-    transformed = transform.apply_to_image(ants_image)
-    return transformed.numpy().astype(image.dtype)
+    ndi = import_module("scipy", "ndimage")
+
+    A = transform.parameters.reshape((3, 4), order="F")
+    A[:, :3] = A[:, :3].transpose()
+
+    # Reference:
+    # https://sourceforge.net/p/advants/discussion/840261/thread/9fbbaab7/
+    # https://github.com/netstim/leaddbs/blob/a2bb3e663cf7fceb2067ac887866124be54aca7d/helpers/ea_antsmat2mat.m
+    # T = original translation offset from A
+    # T = T + (I - A) @ centering
+    A[:, -1] += (np.eye(3) - A[:3, :3]) @ transform.fixed_parameters
+
+    if voxel_size is not None:
+        # transformations are dome on physical space, therefore we map to physical space and then back.
+        inv_scaling = np.diag(1 / np.asarray(voxel_size))
+        scaling = np.eye(4)
+        scaling[:3, :3] = np.diag(voxel_size)
+        A = inv_scaling @ A @ scaling
+
+    A = np.asarray(A, like=image)
+
+    transformed = ndi.affine_transform(image, A, order=1)
+
+    return transformed
