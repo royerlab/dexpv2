@@ -112,21 +112,33 @@ def deskew(
         The deskewed 3D data array.
     """
     new_shape = get_deskewed_shape(raw_data.shape, shift)
-
-    offset = new_shape[-1] - raw_data.shape[-1]
     out_data = np.zeros(new_shape, dtype=raw_data.dtype, like=raw_data)
 
     x_length = raw_data.shape[-1] - 1
-    w1 = shift - math.floor(shift)
-    w2 = math.ceil(shift) - shift
 
     if shift > 0:
         offset = 0
+    else:
+        offset = new_shape[-1] - raw_data.shape[-1]
+
+    shift_per_z = np.arange(new_shape[0]) * shift + offset
+
+    # it's inverted because we work at the pixel edge level and not it's center
+    #    p    q    t
+    #    |    |    |
+    # so pixel q will look at values between p, q and q, t
+    # where w_right is the offset from p to q (going to right)
+    # and w_left is the offset from t to q (going to left)
+    w_right = np.ceil(shift_per_z) - shift_per_z
+    w_left = 1.0 - w_right
+
+    x_length = raw_data.shape[-1] - 1
+    int_shift = np.ceil(shift_per_z).astype(int)
 
     for z in tqdm(range(new_shape[0])):
-        current_shift = int(math.floor(z * shift)) + offset
+        current_shift = int_shift[z]
         out_data[z, :, current_shift : current_shift + x_length] = (
-            w1 * raw_data[z, :, :-1] + w2 * raw_data[z, :, 1:]
+            w_left[z] * raw_data[z, :, :-1] + w_right[z] * raw_data[z, :, 1:]
         )
 
     return out_data
