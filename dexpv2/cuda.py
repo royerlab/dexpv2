@@ -1,6 +1,6 @@
 import importlib
 import logging
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from types import ModuleType
 from typing import Generator
 
@@ -43,6 +43,32 @@ def unified_memory() -> Generator:
     if cp is not None:
         cp.clear_memo()
         cp.cuda.set_allocator(previous_allocator)
+
+
+@contextmanager
+def maybe_unified_memory(value: int, threshold: int = 5368709120) -> Generator:
+    """
+    Initializes cupy's unified memory allocation if it exceeds a threshold.
+    cupy's functions will run slower but it will spill memory memory into cpu without crashing.
+
+    Parameters
+    ----------
+    value : int
+        Value to compare with threshold.
+    threshold : int
+        Threshold in bytes 5368709120 = 1280 * 2048 * 2048.
+
+    Returns
+    -------
+    Generator
+        Unified memory context.
+    """
+    if value > threshold:
+        with unified_memory() as ctx:
+            yield ctx
+    else:
+        with nullcontext() as ctx:
+            yield ctx
 
 
 def torch_default_device() -> th.device:
