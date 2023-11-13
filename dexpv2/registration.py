@@ -75,11 +75,16 @@ def estimate_affine_transform(
     result = registration(
         resampled_ants_fixed,
         resampled_ants_moving,
-        type_of_transform="Rigid",
+        type_of_transform="Affine",
         verbose=verbose,
         **kwargs,
     )
     LOG.info(f"Result: {result}")
+
+    if len(result["fwdtransforms"]) != 1:
+        raise ValueError(
+            f"Expected only one transform. Found {len(result['fwdtransforms'])}"
+        )
 
     transform = ants.read_transform(result["fwdtransforms"][0])
 

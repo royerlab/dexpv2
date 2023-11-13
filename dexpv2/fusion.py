@@ -118,7 +118,7 @@ def dualview_fuse(
         ndi.gaussian_filter(foreground_v1, sigma=sigma, output=foreground_v1)
 
     foreground_total = foreground_v0 + foreground_v1
-    foreground_total[foreground_total < 1e-6] = 1
+    foreground_total = np.where(foreground_total < 1e-6, 1, foreground_total)
 
     foreground_v0 *= V0
     foreground_v1 *= V1
