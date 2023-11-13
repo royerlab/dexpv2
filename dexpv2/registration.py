@@ -103,36 +103,26 @@ def estimate_affine_transform(
     return transform
 
 
-def apply_affine_transform(
+def to_affine_matrix(
     transform: ants.ANTsTransform,
-    image: np.ndarray,
     voxel_size: Optional[ArrayLike],
 ) -> np.ndarray:
     """
-    Apply an affine transformation to a 3D image.
-
-    Modified from Ed's mantin's code.
+    Convert an ANTs transform to an affine matrix.
+    Compatible with `ndi.affine_transform`.
 
     Parameters
     ----------
     transform : ants.ANTsTransform
-        The affine transformation to apply.
-    image : np.ndarray
-        The input image as a NumPy array.
-    voxel_size : ArrayLike
-        The physical voxel size of the image.
+        The ANTs transform to convert.
+    voxel_size : Optional[ArrayLike]
+        The physical voxel size of the image to be transformed.
 
     Returns
     -------
     np.ndarray
-        The transformed image as a NumPy array.
-
-    Example
-    -------
-    >>> transformed_img = apply_affine_transform(affine_transform, input_img, voxel_size=(1, 1, 1))
+        (3, 4) affine matrix.
     """
-    ndi = import_module("scipy", "ndimage")
-
     A = transform.parameters.reshape((3, 4), order="F")
     A[:, :3] = A[:, :3].transpose()
 
@@ -150,7 +140,43 @@ def apply_affine_transform(
         scaling[:3, :3] = np.diag(voxel_size)
         A = inv_scaling @ A @ scaling
 
-    A = np.asarray(A, like=image)
+    return A
+
+
+def apply_affine_transform(
+    transform: Union[ants.ANTsTransform, ArrayLike],
+    image: np.ndarray,
+    voxel_size: Optional[ArrayLike],
+) -> np.ndarray:
+    """
+    Apply an affine transformation to a 3D image.
+
+    Modified from Ed's mantin's code.
+
+    Parameters
+    ----------
+    transform : Union[ants.ANTsTransform, ArrayLike]
+        The affine transformation to apply.
+    image : np.ndarray
+        The input image as a NumPy array.
+    voxel_size : ArrayLike
+        The physical voxel size of the image.
+
+    Returns
+    -------
+    np.ndarray
+        The transformed image as a NumPy array.
+
+    Example
+    -------
+    >>> transformed_img = apply_affine_transform(affine_transform, input_img, voxel_size=(1, 1, 1))
+    """
+    ndi = import_module("scipy", "ndimage")
+
+    if isinstance(transform, ants.ANTsTransform):
+        transform = to_affine_matrix(transform, voxel_size)
+
+    A = np.asarray(transform, like=image)
 
     transformed = ndi.affine_transform(image, A, order=1)
 
