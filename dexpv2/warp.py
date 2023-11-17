@@ -1,3 +1,4 @@
+import logging
 from typing import Callable, Optional, Tuple, Union
 
 import numpy as np
@@ -7,6 +8,9 @@ from dexpv2.crosscorr import phase_cross_corr
 from dexpv2.cuda import import_module, to_texture_memory
 from dexpv2.tiling import apply_tiled_stacked
 from dexpv2.utils import translation_slicing
+
+LOG = logging.getLogger(__name__)
+
 
 _WARP_KERNELS = {
     2: r"""
@@ -175,10 +179,8 @@ def apply_warp(
     )
 
     if image.ndim == 2 and warp_field.shape[0] == 3:
-        raise ValueError(
-            "CUDA Texture does not support length 3 channels."
-            "To avoid this remove the score channel (last) as `apply_warp(warped_image[:-1], ....)"
-        )
+        # IMPORTANT: removing scores to avoid 3 channels in texture memory, 3 is not allowed.
+        warp_field = warp_field[:-1]
 
     field_text, _ = to_texture_memory(
         warp_field,
@@ -356,5 +358,100 @@ def filter_low_quality_vectors(
         for i in range(warp_field.shape[0] - 1):
             corrected_field = ndi.uniform_filter(warp_field[i], size=3)
             warp_field[i][mask] = corrected_field[mask]
+
+    return warp_field
+
+
+def estimate_multiscale_warp(
+    fixed: ArrayLike,
+    moving: ArrayLike,
+    n_scales: int,
+    tile: Tuple[int, ...],
+    overlap: Union[int, Tuple[int, ...]],
+    to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
+    **kwargs,
+) -> np.ndarray:
+    """
+    Estimate the warp field that aligns a 'moving' image to a 'fixed' image.
+
+    This function applies a tiled correlation approach to estimate the warp field
+    needed to align two images. It divides the images into tiles, computes the
+    phase correlation for each tile, and then calculates a score indicating the
+    quality of alignment.
+
+    Parameters
+    ----------
+    fixed : ArrayLike
+        The reference image to which 'moving' is aligned.
+    moving : ArrayLike
+        The image that needs to be warped to align with 'fixed'.
+    n_scales : int
+        The number of scales at which to compute the warp field.
+    tile : Tuple[int, ...]
+        The size of the tiles into which the images are divided for processing.
+    overlap : Union[int, Tuple[int, ...]]
+        The amount of overlap between adjacent tiles, either as a single integer
+        or a tuple specifying the overlap for each dimension.
+    to_device : Callable[[ArrayLike], ArrayLike], optional
+        A function that transfers data to the device where computation will occur,
+        by default identity function (no transfer).
+    **kwargs
+        Additional keyword arguments passed to the phase correlation function.
+
+    Returns
+    -------
+    np.ndarray
+        An array representing the warp field. Each element contains the shift (in
+        (z), y, x) and the correlation score for the corresponding tile.
+    """
+    ndi = import_module("scipy", "ndimage")
+    transform = import_module("skimage", "transform")
+
+    fixed = to_device(fixed)
+    moving = to_device(moving)
+    warp_field = None
+
+    for i in range(n_scales):
+
+        LOG.info(f"Estimating warp field at scale {i+1}/{n_scales}")
+
+        if warp_field is not None:
+            moving = apply_warp(moving.astype(np.float32), warp_field)
+
+        downsampling_factor = 0.5 ** (n_scales - i - 1)
+
+        if downsampling_factor < 1:
+            scaled_moving = ndi.zoom(moving, downsampling_factor, order=1)
+            scaled_fixed = ndi.zoom(fixed, downsampling_factor, order=1)
+        else:
+            scaled_moving = moving
+            scaled_fixed = fixed
+
+        new_warp_field = to_device(
+            estimate_warp(
+                scaled_fixed,
+                scaled_moving,
+                tile,
+                overlap,
+                to_device=to_device,
+                **kwargs,
+            )
+        )
+
+        new_warp_field = filter_low_quality_vectors(
+            new_warp_field, score_threshold=0.75, num_iters=3
+        )
+
+        if warp_field is not None:
+            for c in range(warp_field.shape[0] - 1):
+                new_warp_field[c] += transform.resize(
+                    warp_field[c],
+                    new_warp_field.shape[1:],
+                    order=1,
+                    anti_aliasing=False,
+                    clip=False,
+                )
+
+        warp_field = new_warp_field
 
     return warp_field

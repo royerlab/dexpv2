@@ -1,3 +1,5 @@
+import itertools
+
 import numpy as np
 import pytest
 from scipy.ndimage import affine_transform
@@ -5,13 +7,18 @@ from skimage import data
 from skimage.metrics import structural_similarity
 
 from dexpv2.cuda import to_numpy
-from dexpv2.warp import apply_warp, estimate_warp, filter_low_quality_vectors
+from dexpv2.warp import (
+    apply_warp,
+    estimate_multiscale_warp,
+    estimate_warp,
+    filter_low_quality_vectors,
+)
 
 cp = pytest.importorskip("cupy")
 
 
-@pytest.mark.parametrize("n_dim", [2, 3])
-def test_warp(n_dim: int, interactive_test: bool) -> None:
+@pytest.mark.parametrize("n_dim,multiscale", itertools.product([2, 3], [False, True]))
+def test_warp(n_dim: int, multiscale: bool, interactive_test: bool) -> None:
 
     angle = 10
     angle_rad = np.deg2rad(angle)
@@ -20,7 +27,7 @@ def test_warp(n_dim: int, interactive_test: bool) -> None:
     if n_dim == 2:
         image = image[image.shape[0] // 2]
         affine_matrix = np.eye(2)
-        offset = 10
+        offset = 5
     else:
         # small skew in 3D
         affine_matrix = np.asarray([[1, 0, 0], [0, 1, 0], [np.sin(angle_rad), 0, 1]])
@@ -29,9 +36,22 @@ def test_warp(n_dim: int, interactive_test: bool) -> None:
     # Transform image
     moved_image = affine_transform(image, affine_matrix, offset=offset)
 
-    warp_field = estimate_warp(
-        image, moved_image, tile=(16, 64, 64)[-n_dim:], overlap=4, to_device=cp.asarray
-    )
+    tile = (12, 48, 48)[-n_dim:]
+    overlap = (4, 8, 8)[-n_dim:]
+
+    if multiscale:
+        warp_field = estimate_multiscale_warp(
+            image,
+            moved_image,
+            n_scales=3,
+            tile=tile,
+            overlap=overlap,
+            to_device=cp.asarray,
+        )
+    else:
+        warp_field = estimate_warp(
+            image, moved_image, tile=tile, overlap=overlap, to_device=cp.asarray
+        )
 
     if n_dim == 2:
         warp_field = warp_field[:-1, ...]
