@@ -34,6 +34,7 @@ def test_affine_registration(interactive_test: bool):
         voxel_size=voxel_size,
         reg_px_size=1,
         return_reg_moving=True,
+        aff_smoothing_sigmas=(12.0, 6.0, 3.0, 0),
     )
     other_reg_image = to_numpy(
         apply_affine_transform(
