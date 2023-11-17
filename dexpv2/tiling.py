@@ -1,11 +1,14 @@
+import logging
 from itertools import product
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Protocol, Tuple, Union
 
 import numpy as np
 from numpy.typing import ArrayLike
 from tqdm import tqdm
 
 from dexpv2.cuda import to_numpy
+
+LOG = logging.getLogger(__name__)
 
 
 def blending_map(
@@ -56,7 +59,7 @@ def apply_tiled(
     tile: Tuple[int, ...],
     overlap: Union[int, Tuple[int, ...]],
     pad: str = "reflect",
-    to_device: Optional[Callable[[ArrayLike], ArrayLike]] = None,
+    to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
     out_dtype: np.dtype = np.float32,
 ) -> np.ndarray:
     """
@@ -75,14 +78,14 @@ def apply_tiled(
     pad : str, optional
         Padding mode for tiling, by default "reflect".
     to_device : Optional[Callable[[ArrayLike], ArrayLike]], optional
-        Function to send tiles to device expected by `func`, by default None.
+        Function to send tiles to device expected by `func`.
     out_dtype : np.dtype, optional
         Data type of the output array, by default np.float32.
 
     Returns
     -------
     np.ndarray
-        Output array with the function applied to tiled portions.
+        Output array with the function applied and blended together for each tiled portions.
     """
     if isinstance(overlap, int):
         overlap = (overlap,) * len(tile)
@@ -101,9 +104,7 @@ def apply_tiled(
     arr = np.pad(arr, pad_width, mode=pad)
     out_arr = None
 
-    blending = blending_map(tile, overlap)
-    if to_device is not None:
-        blending = to_device(blending)
+    blending = to_device(blending_map(tile, overlap))
 
     tiling_start = list(
         product(
@@ -120,9 +121,7 @@ def apply_tiled(
             for start, t, o in zip(start_indices, tile, overlap)
         )
 
-        in_tile = arr[slicing]
-        if to_device is not None:
-            in_tile = to_device(in_tile)
+        in_tile = to_device(arr[slicing])
 
         out_tile = func(in_tile)
         del in_tile
@@ -141,13 +140,13 @@ def apply_tiled(
 
         if len(short_axes) > 0:
             # ignoring right side blending on axes that the last tile doesn't overhang
-            fixed_blending = blending_map(
-                tile,
-                overlap,
-                ignore_right=short_axes,
+            fixed_blending = to_device(
+                blending_map(
+                    tile,
+                    overlap,
+                    ignore_right=short_axes,
+                )
             )
-            if to_device is not None:
-                fixed_blending = to_device(fixed_blending)
             out_tile = (
                 out_tile
                 * fixed_blending[
@@ -170,5 +169,94 @@ def apply_tiled(
     assert (
         out_arr.shape[num_non_tiled:] == orig_shape
     ), f"{out_arr.shape} != {orig_shape}"
+
+    return out_arr
+
+
+class ArrayFunc(Protocol):
+    def __call__(self, *args: ArrayLike) -> ArrayLike:
+        ...
+
+
+def apply_tiled_stacked(
+    *arrays: np.ndarray,
+    func: ArrayFunc,
+    tile: Tuple[int, ...],
+    overlap: Union[int, Tuple[int, ...]],
+    pad: str = "constant",
+    to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
+) -> np.ndarray:
+    """
+    Apply a given function to tiled portions of an array and stack the results.
+    It's more versatile than `apply_tiled` but it uses more memory and does not blend the output tiles.
+
+    Parameters
+    ----------
+    arrays : np.ndarray
+        Input arrays to be tiled and processed.
+    func : ArrayFunc
+        Function to apply to each tile.
+    tile : Tuple[int, ...]
+        Sizes of the tiles along each dimension.
+    overlap : Union[int, Tuple[int, ...]]
+        Overlaps of tiles along each dimension.
+    pad : str, optional
+        Padding mode for tiling, by default "constant".
+    to_device : Optional[Callable[[ArrayLike], ArrayLike]], optional
+        Function to send tiles to device expected by `func`, by default None.
+
+    Returns
+    -------
+    np.ndarray
+        Output array with the function applied to tiled portions.
+    """
+    if isinstance(overlap, int):
+        overlap = (overlap,) * len(tile)
+
+    if len(tile) != len(overlap):
+        raise ValueError(
+            f"The length of tiles and overlaps must be the same. Got {len(tile)} and {len(overlap)}."
+        )
+
+    shape = arrays[0].shape
+    num_non_tiled = len(shape) - len(tile)
+    orig_shape = shape[num_non_tiled:]
+    pad_width = ((0, 0),) * num_non_tiled + tuple(
+        (overlap, overlap) for overlap in overlap
+    )
+
+    arrays = tuple(np.pad(a, pad_width, mode=pad) for a in arrays)
+
+    axis_iterators = [
+        range(o, size + 2 * o, t + o) for size, t, o in zip(orig_shape, tile, overlap)
+    ]
+    out_shape = tuple(len(i) for i in axis_iterators)
+    LOG.info(f"Number of tiles per axis: {out_shape}")
+    out_arrays = []
+
+    tiling_start = list(product(*axis_iterators))
+
+    for start_indices in tqdm(tiling_start, "Applying function to tiles"):
+        slicing = (...,) + tuple(
+            slice(start - o, start + t + o)
+            for start, t, o in zip(start_indices, tile, overlap)
+        )
+
+        in_tiles = [to_device(a[slicing]) for a in arrays]
+
+        out_tile = func(*in_tiles)
+        LOG.info(f"Output tile shape: {out_tile.shape}")
+
+        out_arrays.append(to_numpy(out_tile))
+        del in_tiles, out_tile
+
+    if len(out_arrays) == 0:
+        raise ValueError("No tiles were processed.")
+
+    out_arr = np.stack(out_arrays, axis=-1)
+    LOG.info(f"Output stacekd array shape: {out_arr.shape}")
+
+    out_arr = out_arr.reshape((-1, *out_shape))
+    LOG.info(f"Output reshape array shape: {out_arr.shape}")
 
     return out_arr
