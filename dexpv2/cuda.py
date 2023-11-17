@@ -2,7 +2,7 @@ import importlib
 import logging
 from contextlib import contextmanager, nullcontext
 from types import ModuleType
-from typing import Any, Dict, Generator, Iterator, Tuple, cast
+from typing import Any, Dict, Generator, Iterator, Optional, Tuple, cast
 
 import numpy as np
 import torch as th
@@ -136,7 +136,7 @@ def to_numpy(arr: ArrayLike) -> ArrayLike:
 
 def to_texture_memory(
     array: ArrayLike,
-    num_channels: int = 1,
+    channel_axis: Optional[int] = None,
     normalize_values: bool = False,
     normalize_coords: bool = False,
     sampling_mode: str = "linear",
@@ -154,8 +154,8 @@ def to_texture_memory(
     ----------
     array : ArrayLike
         The array to be transferred to texture memory. Typically, this should be a CuPy ndarray.
-    num_channels : int, optional
-        The number of channels of the array. Defaults to 1.
+    channel_axis : int, optional
+        Indicates the axis that contains the channels. Defaults to None.
     normalize_values : bool, optional
         Whether to normalize the values in the texture memory. Defaults to False.
     normalize_coords : bool, optional
@@ -212,6 +212,21 @@ def to_texture_memory(
 
     dtype = np.dtype(array.dtype)
 
+    if channel_axis is None:
+        num_channels = 1
+        spatial_shape = list(array.shape)
+    else:
+        num_channels = array.shape[channel_axis]
+        spatial_shape = list(array.shape)
+        spatial_shape.pop(channel_axis)
+        array = np.moveaxis(array, channel_axis, -1)
+        array = array.reshape(*spatial_shape[:-1], -1)  # (Z), Y, X * C
+
+    if num_channels not in (1, 2, 4):
+        raise ValueError(
+            f"Invalid number of channels ({num_channels}). Only 1, 2, or 4 channels are supported."
+        )
+
     nbits = 8 * dtype.itemsize
     channels = (nbits,) * num_channels + (0,) * (4 - num_channels)
 
@@ -226,7 +241,7 @@ def to_texture_memory(
             f"Invalid dtype ({dtype}). Valid must start with: {list(_CHANNEL_TYPE.keys())}"
         )
 
-    cuda_array = cp.cuda.texture.CUDAarray(format_descriptor, *array.shape)
+    cuda_array = cp.cuda.texture.CUDAarray(format_descriptor, *spatial_shape[::-1])
 
     LOG.info("Creating resource descriptor ...")
 
@@ -263,12 +278,13 @@ def to_texture_memory(
         resource_descriptor, texture_descriptor
     )
 
-    LOG.info("Copying array content ...")
-    array = array.reshape(array.shape[:-1] + (array.shape[-1] * num_channels,))
-
+    LOG.info("Synchronize ...")
     # required by previous dexp code, otherwise it would fail
     cp.cuda.runtime.deviceSynchronize()
 
+    LOG.info("Copying array content ...")
+    LOG.info(f"CUDAArray: {(cuda_array.height, cuda_array.width, cuda_array.depth)}")
+    LOG.info(f"Array shape: {array.shape}")
     cuda_array.copy_from(cp.ascontiguousarray(cp.asarray(array)))
 
     del format_descriptor, texture_descriptor, resource_descriptor

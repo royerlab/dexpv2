@@ -13,7 +13,7 @@ except ImportError:
     import numpy as xp
 
 
-def test_affine_registration(interactive_test: bool):
+def test_affine_registration(interactive_test: bool) -> None:
     # Load the example nuclei image from skimage and keep only one channel
     angle = 10
     image = data.cells3d()[:, 1, :, :]
