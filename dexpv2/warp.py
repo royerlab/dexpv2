@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from dexpv2.crosscorr import phase_cross_corr
-from dexpv2.cuda import to_texture_memory
+from dexpv2.cuda import import_module, to_texture_memory
 from dexpv2.tiling import apply_tiled_stacked
 from dexpv2.utils import translation_slicing
 
@@ -199,7 +199,7 @@ def apply_warp(
 
 def _standardize(arr: ArrayLike) -> ArrayLike:
     arr = arr - arr.mean()
-    arr = arr / arr.std()
+    arr = arr / (np.linalg.norm(arr) - 1e-8)
     return arr
 
 
@@ -209,7 +209,6 @@ def estimate_warp(
     tile: Tuple[int, ...],
     overlap: Union[int, Tuple[int, ...]],
     to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
-    return_warped: bool = False,
     **kwargs,
 ) -> np.ndarray:
     """
@@ -288,5 +287,74 @@ def estimate_warp(
         overlap=overlap,
         to_device=to_device,
     )
+
+    return warp_field
+
+
+def filter_low_quality_vectors(
+    warp_field: ArrayLike,
+    score_threshold: float,
+    num_iters: int,
+) -> ArrayLike:
+    """
+    Correct low-quality vectors in a warp field based on a score threshold.
+
+    This function iteratively smooths parts of the warp field that have
+    a quality score below a specified threshold. The correction is performed
+    using a uniform filter from SciPy's ndimage module.
+
+    Parameters
+    ----------
+    warp_field : ArrayLike
+        The warp field to be corrected. The last channel of this field
+        should represent the quality score of each vector.
+    score_threshold : float
+        The threshold below which vectors are considered low quality and
+        subject to correction.
+    num_iters : int
+        The number of iterations to perform the smoothing operation.
+
+    Returns
+    -------
+    ArrayLike
+        The corrected warp field. The shape and type of the output
+        will match the input warp field.
+
+    Notes
+    -----
+    The correction process involves applying a uniform filter to smooth
+    the warp vectors that are below the quality threshold. This smoothing
+    is performed iteratively for the specified number of iterations.
+
+    This function can be particularly useful in post-processing warp fields
+    obtained from image registration algorithms, especially in cases where
+    some vectors in the field are unreliable or noisy.
+
+    Examples
+    --------
+    >>> warp_field = np.random.rand(100, 100, 3)
+    >>> warp_field[:, :, -1] = np.random.uniform(0, 1, (100, 100))  # Last channel as score
+    >>> corrected_field = correct_low_quality_vector(warp_field, 0.5, 5)
+
+    See Also
+    --------
+    scipy.ndimage.uniform_filter : Function used for applying the smoothing filter.
+    """
+    if warp_field.ndim != warp_field.shape[0]:
+        raise ValueError(
+            "Warp field first dimension must have length=D+1, where D+1 is the dimension of"
+            f"the image, plus the last score-axis. Got shape {warp_field.shape} instead."
+        )
+
+    mask = warp_field[-1] < score_threshold
+    if not np.any(mask):
+        return warp_field
+
+    ndi = import_module("scipy", "ndimage")
+
+    for _ in range(num_iters):
+        for i in range(warp_field.shape[0] - 1):
+            corrected_field = ndi.uniform_filter(warp_field[i], size=3)
+            warp_field[i][mask] = corrected_field[mask]
 
     return warp_field
