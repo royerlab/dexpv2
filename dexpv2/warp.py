@@ -4,8 +4,9 @@ from typing import Callable, Optional, Tuple, Union
 import numpy as np
 from numpy.typing import ArrayLike
 
+from dexpv2.constants import DEXPV2_DEBUG
 from dexpv2.crosscorr import phase_cross_corr
-from dexpv2.cuda import import_module, to_texture_memory
+from dexpv2.cuda import import_module, to_numpy, to_texture_memory
 from dexpv2.tiling import apply_tiled_stacked
 from dexpv2.utils import translation_slicing
 
@@ -268,6 +269,10 @@ def estimate_warp(
 
     def _correlate(*args: ArrayLike) -> np.ndarray:
         moving, fixed = args
+
+        if np.all(fixed < 1e-8):
+            return np.zeros(fixed.ndim + 1, dtype=np.float32)
+
         shift = np.asarray(
             phase_cross_corr(
                 fixed,
@@ -279,7 +284,10 @@ def estimate_warp(
         fixed_slice = fixed[translation_slicing(-shift)].ravel()
         moving_slice = moving[translation_slicing(shift)].ravel()
         score = np.dot(_standardize(fixed_slice), _standardize(moving_slice))
-        return np.asarray((*shift, score.item()), dtype=np.float32)
+        output = np.asarray((*shift, score.item()), dtype=np.float32)
+        LOG.info(f"Tiled warp vector: {output}")
+        print(output)
+        return output
 
     warp_field = apply_tiled_stacked(
         fixed,
@@ -352,10 +360,16 @@ def filter_low_quality_vectors(
     if not np.any(mask):
         return warp_field
 
+    if np.all(mask):
+        LOG.warning("All vectors are low quality, returning zero warp field.")
+        warp_field[:-1, ...] = 0
+        return warp_field
+
     ndi = import_module("scipy", "ndimage")
 
-    for _ in range(num_iters):
-        for i in range(warp_field.shape[0] - 1):
+    for i in range(warp_field.shape[0] - 1):
+        warp_field[i][mask] = 0
+        for _ in range(num_iters):
             corrected_field = ndi.uniform_filter(warp_field[i], size=3)
             warp_field[i][mask] = corrected_field[mask]
 
@@ -408,23 +422,58 @@ def estimate_multiscale_warp(
     transform = import_module("skimage", "transform")
 
     fixed = to_device(fixed)
-    moving = to_device(moving)
+    moving = to_device(moving.astype(np.float32))
     warp_field = None
 
     for i in range(n_scales):
 
         LOG.info(f"Estimating warp field at scale {i+1}/{n_scales}")
 
-        if warp_field is not None:
-            moving = apply_warp(moving.astype(np.float32), warp_field)
+        if warp_field is None:
+            warped_moving = moving
+        else:
+            warped_moving = apply_warp(moving, warp_field)
+
+            if DEXPV2_DEBUG:
+                import napari
+
+                viewer = napari.Viewer()
+                viewer.add_image(
+                    to_numpy(fixed), name="fixed", colormap="red", blending="additive"
+                )
+                viewer.add_image(
+                    to_numpy(warped_moving),
+                    name="warped moving",
+                    colormap="green",
+                    blending="additive",
+                )
+                viewer.add_image(
+                    to_numpy(moving),
+                    name="moving",
+                    colormap="blue",
+                    blending="additive",
+                    visible=False,
+                )
+                # print(moving.shape, warp_field.shape)
+                # viewer.add_image(
+                #     to_numpy(warp_field[-1]),
+                #     scale=np.asarray(moving.shape) / warp_field.shape[1:],
+                #     name="Warp score",
+                #     colormap="magma",
+                #     blending="additive",
+                #     contrast_limits=(0, 1),
+                #     visible=False,
+                # )
+                print(f"Scale {i+1}/{n_scales}")
+                napari.run()
 
         downsampling_factor = 0.5 ** (n_scales - i - 1)
 
         if downsampling_factor < 1:
-            scaled_moving = ndi.zoom(moving, downsampling_factor, order=1)
+            scaled_moving = ndi.zoom(warped_moving, downsampling_factor, order=1)
             scaled_fixed = ndi.zoom(fixed, downsampling_factor, order=1)
         else:
-            scaled_moving = moving
+            scaled_moving = warped_moving
             scaled_fixed = fixed
 
         new_warp_field = to_device(
@@ -437,10 +486,15 @@ def estimate_multiscale_warp(
                 **kwargs,
             )
         )
+        # scaling to original interpolation space
+        new_warp_field[:-1] /= downsampling_factor
 
         new_warp_field = filter_low_quality_vectors(
-            new_warp_field, score_threshold=0.75, num_iters=3
+            new_warp_field, score_threshold=0.75, num_iters=5
         )
+
+        print(downsampling_factor)
+        print(new_warp_field[:-1].min(), new_warp_field[:-1].max())
 
         if warp_field is not None:
             for c in range(warp_field.shape[0] - 1):
@@ -449,7 +503,7 @@ def estimate_multiscale_warp(
                     new_warp_field.shape[1:],
                     order=1,
                     anti_aliasing=False,
-                    clip=False,
+                    clip=True,
                 )
 
         warp_field = new_warp_field

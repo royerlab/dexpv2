@@ -27,7 +27,7 @@ def test_warp(n_dim: int, multiscale: bool, interactive_test: bool) -> None:
     if n_dim == 2:
         image = image[image.shape[0] // 2]
         affine_matrix = np.eye(2)
-        offset = 5
+        offset = 10
     else:
         # small skew in 3D
         affine_matrix = np.asarray([[1, 0, 0], [0, 1, 0], [np.sin(angle_rad), 0, 1]])
