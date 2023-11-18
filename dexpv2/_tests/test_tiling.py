@@ -6,7 +6,7 @@ import torch as th
 from numpy.typing import ArrayLike
 
 from dexpv2.cuda import torch_default_device
-from dexpv2.tiling import apply_tiled, apply_tiled_stacked, blending_map
+from dexpv2.tiling import BlendingMap, apply_tiled, apply_tiled_stacked
 
 try:
     import cupy as xp
@@ -22,10 +22,12 @@ def test_blending_map(
     overlaps: Tuple[int, ...],
 ) -> None:
 
-    blending = blending_map(tiles, overlaps)
+    blending = BlendingMap(tiles, overlaps, num_non_tiled=0)
     expected_shape = tuple(t + 2 * o for t, o in zip(tiles, overlaps))
 
-    assert blending.shape == expected_shape, f"{blending.shape} != {expected_shape}"
+    assert (
+        blending.blending_map.shape == expected_shape
+    ), f"{blending.blending_map.shape} != {expected_shape}"
 
 
 @pytest.mark.parametrize(

@@ -11,13 +11,9 @@ from dexpv2.cuda import to_numpy
 LOG = logging.getLogger(__name__)
 
 
-def blending_map(
-    tile: Tuple[int, ...],
-    overlap: Tuple[int, ...],
-    ignore_right: Tuple[int, ...] = tuple(),
-) -> np.ndarray:
+class BlendingMap:
     """
-    Generate a blending map for tiles with specified overlaps.
+    Class that applies blending to tiles.
 
     Parameters
     ----------
@@ -25,32 +21,114 @@ def blending_map(
         Sizes of the tiles along each dimension.
     overlap : Tuple[int, ...]
         Overlaps of tiles along each dimension.
-    ignore_right : Tuple[int, ...], optional
-        Indices of dimensions to ignore right-side blending, by default an empty tuple.
-
-    Returns
-    -------
-    np.ndarray
-        Blending map for tiles with specified overlaps.
+    num_non_tiled : int
+        Number of dimensions that are not tiled.
+    to_device : Callable[[ArrayLike], ArrayLike], optional
+        Function to send tiles to device expected by `func`, by default None.
     """
-    blending = 1
-    for i in range(len(tile)):
-        if 2 * overlap[i] > tile[i]:
-            raise ValueError(
-                f"2x overlap {overlap[i]} cannot be larger than tile size {tile[i]}."
-            )
-        left_border = np.linspace(0, 1, overlap[i] + 2)[1:-1]
-        if i in ignore_right:
-            right_border = np.ones_like(left_border)
-        else:
-            right_border = np.ones_like(left_border) - left_border
-        line_blending = np.concatenate((left_border, np.ones(tile[i]), right_border))
-        line_blending = line_blending[
-            (None,) * i + (...,) + (None,) * (len(tile) - i - 1)
-        ]
-        blending = blending * line_blending
 
-    return blending
+    def __init__(
+        self,
+        tile: Tuple[int, ...],
+        overlap: Tuple[int, ...],
+        num_non_tiled: int,
+        to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
+    ) -> None:
+
+        self.tile = tile
+        self.overlap = overlap
+        self.num_non_tiled = num_non_tiled
+        self.to_device = to_device
+
+        self.blending_map = self._create_blending_map(
+            tile, overlap, to_device=to_device
+        )
+
+    @staticmethod
+    def _create_blending_map(
+        tile: Tuple[int, ...],
+        overlap: Tuple[int, ...],
+        ignore_right: Tuple[int, ...] = tuple(),
+        to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
+    ) -> ArrayLike:
+        """
+        Generate a blending map for tiles with specified overlaps.
+
+        Parameters
+        ----------
+        tile : Tuple[int, ...]
+            Sizes of the tiles along each dimension.
+        overlap : Tuple[int, ...]
+            Overlaps of tiles along each dimension.
+        ignore_right : Tuple[int, ...], optional
+            Indices of dimensions to ignore right-side blending, by default an empty tuple.
+        to_device : Callable[[ArrayLike], ArrayLike], optional
+            Function to send tiles to device expected by `func`, by default None.
+
+        Returns
+        -------
+        np.ndarray
+            Blending map for tiles with specified overlaps.
+        """
+        blending_map = 1
+        for i in range(len(tile)):
+            if 2 * overlap[i] > tile[i]:
+                raise ValueError(
+                    f"2x overlap {overlap[i]} cannot be larger than tile size {tile[i]}."
+                )
+            left_border = np.linspace(0, 1, overlap[i] + 2)[1:-1]
+            if i in ignore_right:
+                right_border = np.ones_like(left_border)
+            else:
+                right_border = np.ones_like(left_border) - left_border
+            line_blending = np.concatenate(
+                (left_border, np.ones(tile[i]), right_border)
+            )
+            line_blending = line_blending[
+                (None,) * i + (...,) + (None,) * (len(tile) - i - 1)
+            ]
+            blending_map = blending_map * line_blending
+
+        return to_device(blending_map)
+
+    def __call__(self, array: ArrayLike) -> ArrayLike:
+        """Applies blending coefficients to a given array.
+
+        Parameters
+        ----------
+        array : ArrayLike
+            Input array to be blended.
+
+        Returns
+        -------
+        ArrayLike
+            Blended array.
+        """
+        short_axes = tuple(
+            i
+            for i in range(len(self.tile))
+            if array.shape[i + self.num_non_tiled] != self.blending_map.shape[i]
+        )
+
+        if len(short_axes) > 0:
+            # ignoring right side blending on axes that the last tile doesn't overhang
+            fixed_blending = self.to_device(
+                self._create_blending_map(
+                    self.tile,
+                    self.overlap,
+                    ignore_right=short_axes,
+                )
+            )
+            array = (
+                array
+                * fixed_blending[
+                    (...,) + tuple(slice(s) for s in array.shape[self.num_non_tiled :])
+                ]
+            )
+        else:
+            array = array * self.blending_map
+
+        return array
 
 
 def apply_tiled(
@@ -104,7 +182,7 @@ def apply_tiled(
     arr = np.pad(arr, pad_width, mode=pad)
     out_arr = None
 
-    blending = to_device(blending_map(tile, overlap))
+    blending = BlendingMap(tile, overlap, num_non_tiled, to_device=to_device)
 
     tiling_start = list(
         product(
@@ -132,30 +210,7 @@ def apply_tiled(
                 dtype=out_dtype,
             )
 
-        short_axes = tuple(
-            i
-            for i in range(len(tile))
-            if out_tile.shape[i + num_non_tiled] != blending.shape[i]
-        )
-
-        if len(short_axes) > 0:
-            # ignoring right side blending on axes that the last tile doesn't overhang
-            fixed_blending = to_device(
-                blending_map(
-                    tile,
-                    overlap,
-                    ignore_right=short_axes,
-                )
-            )
-            out_tile = (
-                out_tile
-                * fixed_blending[
-                    (...,) + tuple(slice(s) for s in out_tile.shape[num_non_tiled:])
-                ]
-            )
-        else:
-            out_tile = out_tile * blending
-
+        out_tile = blending(out_tile)
         out_tile = to_numpy(out_tile)
         out_arr[slicing] += out_tile
         del out_tile
