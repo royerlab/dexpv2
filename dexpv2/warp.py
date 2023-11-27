@@ -7,7 +7,7 @@ from numpy.typing import ArrayLike
 from dexpv2.constants import DEXPV2_DEBUG
 from dexpv2.crosscorr import phase_cross_corr
 from dexpv2.cuda import import_module, to_numpy, to_texture_memory
-from dexpv2.tiling import apply_tiled_stacked
+from dexpv2.tiling import BlendingMap, apply_tiled_stacked
 from dexpv2.utils import translation_slicing
 
 LOG = logging.getLogger(__name__)
@@ -267,10 +267,18 @@ def estimate_warp(
     >>> warp_field = estimate_warp(fixed, moving, tile, overlap)
     """
 
+    if isinstance(overlap, int):
+        overlap = (overlap,) * len(tile)
+
+    blending = BlendingMap(tile, overlap, num_non_tiled=0, to_device=to_device)
+
     def _correlate(*args: ArrayLike) -> np.ndarray:
         moving, fixed = args
 
-        if np.all(fixed < 1e-8):
+        fixed = blending(fixed)
+        moving = blending(moving)
+
+        if np.all(fixed < 1e-8) or np.all(moving < 1e-8):
             return np.zeros(fixed.ndim + 1, dtype=np.float32)
 
         shift = np.asarray(
@@ -286,7 +294,6 @@ def estimate_warp(
         score = np.dot(_standardize(fixed_slice), _standardize(moving_slice))
         output = np.asarray((*shift, score.item()), dtype=np.float32)
         LOG.info(f"Tiled warp vector: {output}")
-        print(output)
         return output
 
     warp_field = apply_tiled_stacked(
@@ -382,6 +389,7 @@ def estimate_multiscale_warp(
     n_scales: int,
     tile: Tuple[int, ...],
     overlap: Union[int, Tuple[int, ...]],
+    score_threshold: float = 0.5,
     to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
     **kwargs,
 ) -> np.ndarray:
@@ -406,6 +414,9 @@ def estimate_multiscale_warp(
     overlap : Union[int, Tuple[int, ...]]
         The amount of overlap between adjacent tiles, either as a single integer
         or a tuple specifying the overlap for each dimension.
+    score_threshold : float, optional
+        The threshold below which vectors are considered low quality and
+        subject to correction.
     to_device : Callable[[ArrayLike], ArrayLike], optional
         A function that transfers data to the device where computation will occur,
         by default identity function (no transfer).
@@ -454,16 +465,6 @@ def estimate_multiscale_warp(
                     blending="additive",
                     visible=False,
                 )
-                # print(moving.shape, warp_field.shape)
-                # viewer.add_image(
-                #     to_numpy(warp_field[-1]),
-                #     scale=np.asarray(moving.shape) / warp_field.shape[1:],
-                #     name="Warp score",
-                #     colormap="magma",
-                #     blending="additive",
-                #     contrast_limits=(0, 1),
-                #     visible=False,
-                # )
                 print(f"Scale {i+1}/{n_scales}")
                 napari.run()
 
@@ -490,11 +491,13 @@ def estimate_multiscale_warp(
         new_warp_field[:-1] /= downsampling_factor
 
         new_warp_field = filter_low_quality_vectors(
-            new_warp_field, score_threshold=0.75, num_iters=5
+            new_warp_field, score_threshold=score_threshold, num_iters=5
         )
 
-        print(downsampling_factor)
-        print(new_warp_field[:-1].min(), new_warp_field[:-1].max())
+        LOG.info(f"Down sampling factor: {downsampling_factor}")
+        LOG.info(
+            f"Warping score range: {new_warp_field[-1].min()}, {new_warp_field[-1].max()}"
+        )
 
         if warp_field is not None:
             for c in range(warp_field.shape[0] - 1):

@@ -46,6 +46,7 @@ def test_warp(n_dim: int, multiscale: bool, interactive_test: bool) -> None:
             n_scales=3,
             tile=tile,
             overlap=overlap,
+            score_threshold=0.75,
             to_device=cp.asarray,
         )
     else:
