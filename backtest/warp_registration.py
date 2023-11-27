@@ -35,9 +35,16 @@ def main() -> None:
         warp_field = estimate_multiscale_warp(
             v1,
             v0,
-            n_scales=4,
-            tile=(32, 128, 128),
-            overlap=(16, 64, 64),
+            # n_scales=4,
+            # tile=(32, 128, 128),
+            # overlap=(16, 64, 64),
+            # n_scales=5,
+            # tile=(16, 64, 64),
+            # overlap=(8, 32, 32),
+            n_scales=6,
+            tile=(8, 32, 32),
+            overlap=(4, 16, 16),
+            score_threshold=0.5,
             to_device=cp.asarray,
         )
 
