@@ -22,8 +22,8 @@ extern "C"{
                             int width,
                             int height)
     {
-        unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
-        unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
+        unsigned long x = blockIdx.x * blockDim.x + threadIdx.x;
+        unsigned long y = blockIdx.y * blockDim.y + threadIdx.y;
 
         if (x < width && y < height)
         {
@@ -63,9 +63,9 @@ extern "C"{
                             int height,
                             int depth)
     {
-        unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
-        unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
-        unsigned int z = blockIdx.z * blockDim.z + threadIdx.z;
+        unsigned long x = blockIdx.x * blockDim.x + threadIdx.x;
+        unsigned long y = blockIdx.y * blockDim.y + threadIdx.y;
+        unsigned long z = blockIdx.z * blockDim.z + threadIdx.z;
 
         if (x < width && y < height && z < depth)
         {
@@ -491,7 +491,9 @@ def estimate_multiscale_warp(
         new_warp_field[:-1] /= downsampling_factor
 
         new_warp_field = filter_low_quality_vectors(
-            new_warp_field, score_threshold=score_threshold, num_iters=5
+            new_warp_field,
+            score_threshold=score_threshold,
+            num_iters=10,
         )
 
         LOG.info(f"Down sampling factor: {downsampling_factor}")
