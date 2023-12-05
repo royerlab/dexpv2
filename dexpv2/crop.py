@@ -103,6 +103,13 @@ def find_moving_bboxes_consensus(
             f"Number of bbox dimensions ({bboxes.shape[1]}) does not match number of shift dimensions ({ndim} x 2)."
         )
 
+    shift_std = shifts.std(axis=0)
+    mean_shift = shifts.mean(axis=0)
+    outlier_shift = np.abs(shifts - mean_shift) > 2 * shift_std
+    shifts[outlier_shift] = 0
+
+    print(f"Outlier shifts found: {outlier_shift.sum()}")
+
     cum_shifts = np.cumsum(shifts, axis=0)
 
     start = np.quantile(bboxes[:, :ndim], 1 - quantile, axis=0)[None, ...] + cum_shifts

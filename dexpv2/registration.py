@@ -75,7 +75,7 @@ def estimate_affine_transform(
     result = registration(
         resampled_ants_fixed,
         resampled_ants_moving,
-        type_of_transform="Affine",
+        type_of_transform="DenseRigid",
         verbose=verbose,
         **kwargs,
     )

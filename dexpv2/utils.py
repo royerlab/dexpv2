@@ -11,7 +11,7 @@ def center_crop(arr: ArrayLike, shape: Tuple[int, ...]) -> ArrayLike:
     """Crops the center of `arr`"""
     assert arr.ndim == len(shape)
 
-    starts = ((cur_s - s) // 2 for cur_s, s in zip(arr.shape, shape))
+    starts = tuple((cur_s - s) // 2 for cur_s, s in zip(arr.shape, shape))
 
     assert all(s >= 0 for s in starts)
 
