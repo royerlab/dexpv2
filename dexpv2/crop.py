@@ -11,7 +11,7 @@ from dexpv2.utils import to_cpu
 def foreground_bbox(
     image: ArrayLike,
     voxel_size: ArrayLike,
-    downscale: int = 16,
+    downscale: int = 20,
 ) -> ArrayLike:
     """
     Compute bounding box of the largest foreground object.
@@ -40,9 +40,9 @@ def foreground_bbox(
     foreground = image > np.mean(image)
 
     if image.ndim == 2:
-        struct = morph.disk(3)
+        struct = morph.disk(5)
     elif image.ndim == 3:
-        struct = morph.ball(3)
+        struct = morph.ball(5)
     else:
         raise ValueError(
             f"Unsupported image dimension {image.ndim}. Only 2D and 3D allowed."
@@ -138,3 +138,32 @@ def to_slice(bbox: ArrayLike) -> Tuple[slice, ...]:
     bbox = np.asarray(bbox)
     ndim = bbox.size // 2
     return tuple(slice(start, end) for start, end in zip(bbox[:ndim], bbox[ndim:]))
+
+
+def fix_crop_slice(
+    crop_slice: Tuple[slice, ...],
+    source_shape: Tuple[int, ...],
+) -> Tuple[Tuple[slice, ...], Tuple[slice, ...]]:
+    """
+    Fix crop slice when it exceeds the source shape.
+
+    Parameters
+    ----------
+    crop_slice : Tuple[slice, ...]
+        Cropping slicing tuple, must have .start and .stop.
+    source_shape : Tuple[int, ...]
+        Source (cropped object) shape.
+
+    Returns
+    -------
+    Tuple[Tuple[slice, ...], Tuple[slice, ...]]
+        Fixed source slice and destination slice to match cropping.
+    """
+    fixed_slice = tuple(
+        slice(max(0, slc.start), min(src, slc.stop))
+        for slc, src in zip(crop_slice, source_shape)
+    )
+
+    dst_slice = tuple(slice(0, f.stop - f.start) for f in fixed_slice)
+
+    return fixed_slice, dst_slice
