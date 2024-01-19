@@ -30,7 +30,7 @@ def _preprocess(img: ArrayLike, psf: ArrayLike) -> Tuple[ArrayLike, ArrayLike]:
     psf = psf / psf.sum()
 
     img = pad_to_shape(img, shape=new_shape, mode="constant")
-    psf = pad_to_shape(psf, shape=new_shape, mode="reflect")
+    psf = pad_to_shape(psf, shape=new_shape, mode="constant")
 
     assert img.shape == psf.shape
 
