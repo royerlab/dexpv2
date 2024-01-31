@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Tuple, cast
+from typing import Callable, Optional, Tuple, cast
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -29,6 +29,7 @@ def phase_cross_corr(
     mov_img: ArrayLike,
     maximum_shift: float = 1.0,
     to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
+    transform: Optional[Callable[[ArrayLike], ArrayLike]] = np.log1p,
 ) -> Tuple[int, ...]:
     """
     Computes translation shift using arg. maximum of phase cross correlation.
@@ -64,8 +65,9 @@ def phase_cross_corr(
     ref_img = to_device(ref_img)
     mov_img = to_device(mov_img)
 
-    ref_img = np.log1p(ref_img)
-    mov_img = np.log1p(mov_img)
+    if transform is not None:
+        ref_img = transform(ref_img)
+        mov_img = transform(mov_img)
 
     Fimg1 = np.fft.rfftn(ref_img)
     Fimg2 = np.fft.rfftn(mov_img)
