@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -71,6 +71,7 @@ def find_moving_bboxes_consensus(
     bboxes: ArrayLike,
     shifts: ArrayLike,
     quantile: float = 0.9,
+    outlier_threshold: Optional[float] = 2,
 ) -> ArrayLike:
     """
     Find consensus bounding box of moving objects.
@@ -83,6 +84,8 @@ def find_moving_bboxes_consensus(
         Shifts of moving objects (N, D) array.
     quantile : float
         Quantile to use for consensus bounding box size.
+    outlier_threshold : float
+        Threshold for outlier shifts, multiples of standard deviation of shifts.
 
     Returns
     -------
@@ -103,12 +106,15 @@ def find_moving_bboxes_consensus(
             f"Number of bbox dimensions ({bboxes.shape[1]}) does not match number of shift dimensions ({ndim} x 2)."
         )
 
-    shift_std = shifts.std(axis=0)
-    mean_shift = shifts.mean(axis=0)
-    outlier_shift = np.abs(shifts - mean_shift) > 2 * shift_std
-    shifts[outlier_shift] = 0
+    if outlier_threshold is not None:
+        shift_std = shifts.std(axis=0)
+        mean_shift = shifts.mean(axis=0)
+        outlier_shift = np.abs(shifts - mean_shift) > 2 * shift_std
+        shifts[outlier_shift] = 0
 
-    print(f"Outlier shifts found: {outlier_shift.sum()}")
+        print(f"Mean shift: {mean_shift}")
+        print(f"Shift std: {shift_std}")
+        print(f"Outlier shifts found: {outlier_shift.sum()}")
 
     cum_shifts = np.cumsum(shifts, axis=0)
 

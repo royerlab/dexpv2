@@ -5,6 +5,7 @@ import numpy as np
 from numpy.typing import ArrayLike
 
 from dexpv2.cuda import import_module
+from dexpv2.intensity import equalize_views
 from dexpv2.utils import translation_slicing
 
 LOG = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ def dualview_fuse(
     V1: ArrayLike,
     voxel_size: ArrayLike,
     blending_sigma: float = 0.0,
+    equalize: bool = False,
 ) -> ArrayLike:
     """
     Fuse two views, V0 and V1, to create a combined image.
@@ -93,6 +95,8 @@ def dualview_fuse(
         The physical voxel size of the images.
     blending_sigma : float, optional
         The standard deviation for Gaussian blurring of foreground regions. Default is 0.0 (no blending).
+    equalize : bool, optional
+        When True, the intensity of the views are equalized to the brightest view. Default is False.
 
     Returns
     -------
@@ -119,6 +123,9 @@ def dualview_fuse(
 
     foreground_total = foreground_v0 + foreground_v1
     foreground_total = np.where(foreground_total < 1e-6, 1, foreground_total)
+
+    if equalize:
+        V0, V1 = equalize_views(V0, V1)
 
     foreground_v0 *= V0
     foreground_v1 *= V1
