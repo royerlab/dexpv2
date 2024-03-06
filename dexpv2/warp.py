@@ -177,6 +177,7 @@ def apply_warp(
         image,
         normalize_coords=False,
         sampling_mode="linear",
+        address_mode="border",
     )
 
     if image.ndim == 2 and warp_field.shape[0] == 3:
@@ -188,7 +189,7 @@ def apply_warp(
         channel_axis=0,
         normalize_coords=True,
         sampling_mode="linear",
-        address_mode="clamp",
+        address_mode="border",
     )
 
     warp_kernel(
