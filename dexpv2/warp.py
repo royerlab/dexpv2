@@ -472,8 +472,10 @@ def estimate_multiscale_warp(
         downsampling_factor = 0.5 ** (n_scales - i - 1)
 
         if downsampling_factor < 1:
-            scaled_moving = ndi.zoom(warped_moving, downsampling_factor, order=1)
-            scaled_fixed = ndi.zoom(fixed, downsampling_factor, order=1)
+            scaled_moving = ndi.zoom(
+                warped_moving, downsampling_factor, order=1, mode="nearest"
+            )
+            scaled_fixed = ndi.zoom(fixed, downsampling_factor, order=1, mode="nearest")
         else:
             scaled_moving = warped_moving
             scaled_fixed = fixed

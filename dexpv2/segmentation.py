@@ -89,7 +89,9 @@ def detect_foreground(
     del background
 
     # threshold in smaller image to save memory and sqrt to deskew data distribution towards left
-    small_foreground = np.sqrt(ndi.zoom(foreground, (0.25,) * foreground.ndim, order=1))
+    small_foreground = np.sqrt(
+        ndi.zoom(foreground, (0.25,) * foreground.ndim, order=1, mode="nearest")
+    )
 
     # begin thresholding
     robust_max = np.quantile(small_foreground, 1 - 1e-6)

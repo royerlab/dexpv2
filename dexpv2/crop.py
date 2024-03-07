@@ -1,11 +1,13 @@
+import logging
 from typing import Optional, Tuple
 
 import numpy as np
 from numpy.typing import ArrayLike
 from scipy.ndimage import find_objects
 
-from dexpv2.cuda import import_module
-from dexpv2.utils import to_cpu
+from dexpv2.cuda import import_module, to_numpy
+
+LOG = logging.getLogger(__name__)
 
 
 def foreground_bbox(
@@ -33,9 +35,10 @@ def foreground_bbox(
     ndi = import_module("scipy", "ndimage")
     morph = import_module("skimage", "morphology")
 
+    original_shape = np.asarray(image.shape)
     scaling = np.asarray([v / downscale for v in voxel_size])
 
-    image = ndi.zoom(image, scaling, order=1)
+    image = ndi.zoom(image, scaling, order=1, mode="nearest")
 
     foreground = image > np.mean(image)
 
@@ -50,27 +53,43 @@ def foreground_bbox(
 
     foreground = morph.binary_closing(foreground, footprint=struct)
 
-    labels, n_labels = ndi.label(foreground)
+    labels, _ = ndi.label(foreground)
 
-    area = ndi.sum_labels(
-        foreground, labels, index=np.arange(1, n_labels + 1, like=foreground)
-    )
+    start = np.asarray(labels.shape)
+    end = np.zeros_like(start)
 
-    largest = np.argmax(area) + 1
+    # 320 ^ 3 pixels in physical units
+    # minimum size to be a meaningful object
+    min_size = np.prod(scaling * 320)
+    LOG.warning("Min size: %s", min_size)
 
-    obj = find_objects(to_cpu(labels == largest))[0]
+    for obj in find_objects(to_numpy(labels)):
+        if obj is None:
+            continue
+        area = np.prod([s.stop - s.start for s in obj])
+        LOG.warning("Area: %s, obj slicing: %s", area, obj)
+        if area < min_size:
+            continue
+        LOG.warning("Passed area check.")
+        start = np.minimum(start, [s.start for s in obj])
+        end = np.maximum(end, [s.stop for s in obj])
 
-    bbox = np.asarray([[s.start for s in obj], [s.stop for s in obj]])
+    if np.any(start > end):
+        LOG.warning("No foreground object found.")
+        bbox = np.concatenate([np.zeros_like(start), original_shape])
+    else:
+        start = np.maximum(start - 1, 0) / scaling
+        end = (end + 2) / scaling  # 1 padding plus 1 to compensate for start
+        bbox = np.concatenate([start, end])
+        bbox = np.round(bbox).astype(int)
 
-    bbox = np.round(bbox / scaling).astype(int)
-
-    return bbox.reshape(-1)
+    return bbox
 
 
 def find_moving_bboxes_consensus(
     bboxes: ArrayLike,
     shifts: ArrayLike,
-    quantile: float = 0.9,
+    quantile: float = 0.95,
     outlier_threshold: Optional[float] = 2,
 ) -> ArrayLike:
     """
