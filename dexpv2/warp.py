@@ -8,7 +8,6 @@ from dexpv2.constants import DEXPV2_DEBUG
 from dexpv2.crosscorr import phase_cross_corr
 from dexpv2.cuda import import_module, to_numpy, to_texture_memory
 from dexpv2.tiling import BlendingMap, apply_tiled_stacked
-from dexpv2.utils import translation_slicing
 
 LOG = logging.getLogger(__name__)
 
@@ -107,6 +106,7 @@ def apply_warp(
     image: ArrayLike,
     warp_field: ArrayLike,
     cuda_block_size: Optional[int] = None,
+    upsample: bool = True,
 ) -> ArrayLike:
     """
     Apply a warp field to an image using CUDA Texture, requires cupy.
@@ -124,6 +124,8 @@ def apply_warp(
     cuda_block_size : Optional[int], default None
         The size of the CUDA block for GPU computation. If None, a default
         size of 8 is used. Only relevant when using CUDA.
+    upsample : bool, default True
+        Whether to upsample the vector field by 2 before interpolating.
 
     Raises
     ------
@@ -167,6 +169,19 @@ def apply_warp(
             f"Warp field must be {image.ndim + 1}D, got {warp_field.ndim}D instead!"
         )
 
+    if upsample:
+        if np.any(warp_field.shape[-image.ndim :] * 2 > image.shape):
+            raise ValueError(
+                f"Upsampling by 2 would make the warp field larger than the image. "
+                f"Image shape: {image.shape}, Warp field shape: {warp_field.shape[-image.ndim:]}."
+            )
+        import cupyx.scipy.ndimage as ndi
+
+        # this improves warping where regions are changing quickly
+        warp_field = ndi.zoom(
+            warp_field, (1,) + (2,) * image.ndim, order=1, mode="nearest"
+        )
+
     warp_kernel = cp.RawKernel(_WARP_KERNELS[image.ndim], f"warp_{image.ndim}d")
     warped_image = cp.empty_like(image)
 
@@ -189,7 +204,7 @@ def apply_warp(
         channel_axis=0,
         normalize_coords=True,
         sampling_mode="linear",
-        address_mode="border",
+        address_mode="clamp",
     )
 
     warp_kernel(
@@ -267,6 +282,7 @@ def estimate_warp(
     >>> overlap = 10
     >>> warp_field = estimate_warp(fixed, moving, tile, overlap)
     """
+    ndi = import_module("scipy", "ndimage")
 
     if isinstance(overlap, int):
         overlap = (overlap,) * len(tile)
@@ -290,11 +306,10 @@ def estimate_warp(
                 **kwargs,
             )
         )
-        fixed_slice = fixed[translation_slicing(-shift)].ravel()
-        moving_slice = moving[translation_slicing(shift)].ravel()
-        score = np.dot(_standardize(fixed_slice), _standardize(moving_slice))
+        moving = ndi.shift(moving, -shift, order=1, mode="nearest")
+        score = np.dot(_standardize(fixed.ravel()), _standardize(moving.ravel()))
         output = np.asarray((*shift, score.item()), dtype=np.float32)
-        LOG.info(f"Tiled warp vector: {output}")
+        LOG.info("Tiled warp vector: %s", output)
         return output
 
     warp_field = apply_tiled_stacked(
@@ -499,9 +514,11 @@ def estimate_multiscale_warp(
             num_iters=10,
         )
 
-        LOG.info(f"Down sampling factor: {downsampling_factor}")
+        LOG.info("Down sampling factor: %s", downsampling_factor)
         LOG.info(
-            f"Warping score range: {new_warp_field[-1].min()}, {new_warp_field[-1].max()}"
+            "Warping score range: %s, %s",
+            new_warp_field[-1].min(),
+            new_warp_field[-1].max(),
         )
 
         if warp_field is not None:
@@ -510,7 +527,7 @@ def estimate_multiscale_warp(
                     warp_field[c],
                     new_warp_field.shape[1:],
                     order=1,
-                    anti_aliasing=False,
+                    anti_aliasing=True,
                     clip=True,
                 )
 

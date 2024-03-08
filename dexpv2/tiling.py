@@ -25,6 +25,9 @@ class BlendingMap:
         Number of dimensions that are not tiled.
     to_device : Callable[[ArrayLike], ArrayLike], optional
         Function to send tiles to device expected by `func`, by default None.
+    power : float, optional
+        Power to raise the blending map to, by default 1.0.
+        NOTE: this won't guarantee that the blending map will sum to 1.
     """
 
     def __init__(
@@ -33,15 +36,20 @@ class BlendingMap:
         overlap: Tuple[int, ...],
         num_non_tiled: int,
         to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
+        power: float = 1.0,
     ) -> None:
 
         self.tile = tile
         self.overlap = overlap
         self.num_non_tiled = num_non_tiled
         self.to_device = to_device
+        self._power = power
 
         self.blending_map = self._create_blending_map(
-            tile, overlap, to_device=to_device
+            tile,
+            overlap,
+            to_device=to_device,
+            power=self._power,
         )
 
     @staticmethod
@@ -50,6 +58,7 @@ class BlendingMap:
         overlap: Tuple[int, ...],
         ignore_right: Tuple[int, ...] = tuple(),
         to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
+        power: float = 1.0,
     ) -> ArrayLike:
         """
         Generate a blending map for tiles with specified overlaps.
@@ -64,6 +73,9 @@ class BlendingMap:
             Indices of dimensions to ignore right-side blending, by default an empty tuple.
         to_device : Callable[[ArrayLike], ArrayLike], optional
             Function to send tiles to device expected by `func`, by default None.
+        power : float, optional
+            Power to raise the blending map to, by default 1.0.
+            NOTE: this won't guarantee that the blending map will sum to 1.
 
         Returns
         -------
@@ -88,6 +100,8 @@ class BlendingMap:
                 (None,) * i + (...,) + (None,) * (len(tile) - i - 1)
             ]
             blending_map = blending_map * line_blending
+
+        blending_map = np.power(blending_map, power)
 
         return to_device(blending_map)
 
@@ -117,6 +131,7 @@ class BlendingMap:
                     self.tile,
                     self.overlap,
                     ignore_right=short_axes,
+                    power=self._power,
                 )
             )
             array = (
