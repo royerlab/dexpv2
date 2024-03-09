@@ -89,18 +89,23 @@ def foreground_bbox(
 def find_moving_bboxes_consensus(
     bboxes: ArrayLike,
     shifts: ArrayLike,
-    quantile: float = 0.95,
+    shape: ArrayLike,
+    quantile: float = 0.99,
     outlier_threshold: Optional[float] = 2,
 ) -> ArrayLike:
     """
     Find consensus bounding box of moving objects.
+    First 2 * D dimensions are start and end of source bounding boxes.
+    Last 2 * D dimensions are start and end of destination bounding boxes.
 
     Parameters
     ----------
     bboxes : ArrayLike
-        Bounding boxes of moving objects (N, 2D) array.
+        Bounding boxes of moving objects (N, 2 * D) array.
     shifts : ArrayLike
         Shifts of moving objects (N, D) array.
+    spatial_shape : ArrayLike
+        Volume shape.
     quantile : float
         Quantile to use for consensus bounding box size.
     outlier_threshold : float
@@ -109,7 +114,7 @@ def find_moving_bboxes_consensus(
     Returns
     -------
     ArrayLike
-        Fixed bounding boxes, (N, 2D) array.
+        Fixed bounding boxes, (N, 4 * D) array.
     """
     bboxes = np.asarray(bboxes)
     shifts = np.asarray(shifts)
@@ -135,15 +140,32 @@ def find_moving_bboxes_consensus(
         print(f"Shift std: {shift_std}")
         print(f"Outlier shifts found: {outlier_shift.sum()}")
 
+    # accumulate shifts
     cum_shifts = np.cumsum(shifts, axis=0)
 
-    start = np.quantile(bboxes[:, :ndim], 1 - quantile, axis=0)[None, ...] + cum_shifts
-    start = np.clip(start, 0, None)
+    # enlarged bounding boxes
+    bboxes_size = bboxes[:, ndim:] - bboxes[:, :ndim]
+    suggested_size = np.quantile(bboxes_size, quantile, axis=0)
+    suggested_size = np.round(suggested_size).astype(int)
 
-    size = np.quantile(bboxes[:, ndim:] - bboxes[:, :ndim], quantile, axis=0)
-    end = start + size
+    diff_from_size = np.clip(suggested_size - bboxes_size, 0, None)
 
-    return np.round(np.concatenate([start, end], axis=1)).astype(int)
+    src_start = bboxes[:, :ndim] - diff_from_size // 2
+    src_start = np.clip(src_start, 0, None)
+    src_start = np.round(src_start).astype(int)
+
+    src_end = bboxes[:, ndim:] + diff_from_size // 2
+    src_end = np.minimum(src_end, shape)
+    src_end = np.round(src_end).astype(int)
+
+    # apply shift to destination bounding box
+    dst_start = src_start - cum_shifts
+    dst_start = dst_start - dst_start.min(axis=0)
+    dst_end = dst_start + src_end - src_start
+
+    return np.round(
+        np.concatenate([src_start, src_end, dst_start, dst_end], axis=1)
+    ).astype(int)
 
 
 def to_slice(bbox: ArrayLike) -> Tuple[slice, ...]:
