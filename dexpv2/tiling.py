@@ -11,6 +11,12 @@ from dexpv2.cuda import to_numpy
 LOG = logging.getLogger(__name__)
 
 
+def _scaled_sigmoid(x: ArrayLike) -> ArrayLike:
+    # Reference:
+    # https://www.wolframalpha.com/input?i=1+%2F+%281+%2B+exp%28-%28x+-+0.5%29+*+10%29%29%3B+x+from+0+to+1
+    return 1 / (1 + np.exp(-(x - 0.5) * 10))
+
+
 class BlendingMap:
     """
     Class that applies blending to tiles.
@@ -25,9 +31,10 @@ class BlendingMap:
         Number of dimensions that are not tiled.
     to_device : Callable[[ArrayLike], ArrayLike], optional
         Function to send tiles to device expected by `func`, by default None.
-    power : float, optional
-        Power to raise the blending map to, by default 1.0.
-        NOTE: this won't guarantee that the blending map will sum to 1.
+    scaling_func : Callable[[ArrayLike], ArrayLike], optional
+        Function to scale blending coefficients (0 to 1), by default
+        1 / (1 + exp(-(x - 0.5) * 10))
+        Ideally, the function should be symmetric around 0.5 and have a range of 0 to 1.
     """
 
     def __init__(
@@ -36,20 +43,20 @@ class BlendingMap:
         overlap: Tuple[int, ...],
         num_non_tiled: int,
         to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
-        power: float = 1.0,
+        scaling_func: Callable[[ArrayLike], ArrayLike] = _scaled_sigmoid,
     ) -> None:
 
         self.tile = tile
         self.overlap = overlap
         self.num_non_tiled = num_non_tiled
         self.to_device = to_device
-        self._power = power
+        self._scaling_func = scaling_func
 
         self.blending_map = self._create_blending_map(
             tile,
             overlap,
             to_device=to_device,
-            power=self._power,
+            scaling_func=self._scaling_func,
         )
 
     @staticmethod
@@ -58,7 +65,7 @@ class BlendingMap:
         overlap: Tuple[int, ...],
         ignore_right: Tuple[int, ...] = tuple(),
         to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
-        power: float = 1.0,
+        scaling_func: Callable[[ArrayLike], ArrayLike] = _scaled_sigmoid,
     ) -> ArrayLike:
         """
         Generate a blending map for tiles with specified overlaps.
@@ -73,9 +80,10 @@ class BlendingMap:
             Indices of dimensions to ignore right-side blending, by default an empty tuple.
         to_device : Callable[[ArrayLike], ArrayLike], optional
             Function to send tiles to device expected by `func`, by default None.
-        power : float, optional
-            Power to raise the blending map to, by default 1.0.
-            NOTE: this won't guarantee that the blending map will sum to 1.
+        scaling_func : Callable[[ArrayLike], ArrayLike], optional
+            Function to scale blending coefficients (0 to 1), by default
+            1 / (1 + exp(-(x - 0.5) * 10))
+            Ideally, the function should be symmetric around 0.5 and have a range of 0 to 1.
 
         Returns
         -------
@@ -88,7 +96,10 @@ class BlendingMap:
                 raise ValueError(
                     f"2x overlap {overlap[i]} cannot be larger than tile size {tile[i]}."
                 )
+
             left_border = np.linspace(0, 1, overlap[i] + 2)[1:-1]
+            left_border = scaling_func(left_border)
+
             if i in ignore_right:
                 right_border = np.ones_like(left_border)
             else:
@@ -100,8 +111,6 @@ class BlendingMap:
                 (None,) * i + (...,) + (None,) * (len(tile) - i - 1)
             ]
             blending_map = blending_map * line_blending
-
-        blending_map = np.power(blending_map, power)
 
         return to_device(blending_map)
 
@@ -131,7 +140,7 @@ class BlendingMap:
                     self.tile,
                     self.overlap,
                     ignore_right=short_axes,
-                    power=self._power,
+                    scaling_func=self._scaling_func,
                 )
             )
             array = (
@@ -202,7 +211,7 @@ def apply_tiled(
     tiling_start = list(
         product(
             *[
-                range(o, size + 2 * o, t + o)
+                range(o, size + 2 * o, t + o)  # t + o step, because of blending map
                 for size, t, o in zip(orig_shape, tile, overlap)
             ]
         )
@@ -298,7 +307,7 @@ def apply_tiled_stacked(
     arrays = tuple(np.pad(a, pad_width, mode=pad) for a in arrays)
 
     axis_iterators = [
-        range(o, size + 2 * o, t + o) for size, t, o in zip(orig_shape, tile, overlap)
+        range(o, size + o, t) for size, t, o in zip(orig_shape, tile, overlap)
     ]
     out_shape = tuple(len(i) for i in axis_iterators)
     LOG.info(f"Number of tiles per axis: {out_shape}")
