@@ -50,7 +50,7 @@ def get_deskewed_shape(
     x_size = int(round((shape[0] * resample_factor + shape[2]) * lateral_scaling))
 
     out_shape = (
-        shape[2] // resample_factor - 1,
+        math.ceil(shape[2] / resample_factor) - 1,
         shape[1],
         x_size,
     )

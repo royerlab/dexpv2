@@ -217,8 +217,8 @@ def apply_warp(
 
 
 def _standardize(arr: ArrayLike) -> ArrayLike:
-    arr = arr - arr.mean()
-    arr = arr / (np.linalg.norm(arr) - 1e-8)
+    # arr = arr - arr.mean()
+    arr = arr / (np.linalg.norm(arr) + 1e-8)
     return arr
 
 
@@ -511,7 +511,7 @@ def estimate_multiscale_warp(
         new_warp_field = filter_low_quality_vectors(
             new_warp_field,
             score_threshold=score_threshold,
-            num_iters=10,
+            num_iters=5,
         )
 
         LOG.info("Down sampling factor: %s", downsampling_factor)
