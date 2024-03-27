@@ -37,7 +37,7 @@ def estimate_quantiles(
     lower_quantile = np.quantile(arr, lower)
     upper_quantile = np.quantile(arr, upper)
 
-    return lower_quantile, upper_quantile
+    return lower_quantile.item(), upper_quantile.item()
 
 
 def equalize_views(

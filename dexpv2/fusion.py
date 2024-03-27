@@ -1,5 +1,5 @@
 import logging
-from typing import Callable
+from typing import Callable, Optional
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -18,6 +18,7 @@ def multiview_fuse(
     C1L1: ArrayLike,
     camera_1_translation: ArrayLike,
     camera_1_flip: bool,
+    L1_over_L0_ratio: Optional[float] = None,
     to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
 ) -> ArrayLike:
     """
@@ -40,6 +41,8 @@ def multiview_fuse(
         Translation between camera 1 and camera 0 (reference).
     camera_1_flip : ArrayLike
         Indicates if camera 1 is flipped on the last axis.
+    L1_over_L0_ratio : float, optional
+        Ratio between the light sheet intensity of camera 1 and camera 0.
     to_device : Callable, optional
         Helper function to send data to specialized device, this function sends the data
         to the device only when needed, reducing the memory usage.
@@ -49,8 +52,26 @@ def multiview_fuse(
     ArrayLike
         Fused image.
     """
-    camera_0 = (to_device(C0L0).astype(np.float32) + to_device(C0L1)) / 2
-    camera_1 = (to_device(C1L0).astype(np.float32) + to_device(C1L1)) / 2
+    if L1_over_L0_ratio is None:
+        camera_0 = (to_device(C0L0).astype(np.float32) + to_device(C0L1)) * 0.5
+        camera_1 = (to_device(C1L0).astype(np.float32) + to_device(C1L1)) * 0.5
+
+    elif L1_over_L0_ratio > 1.0:
+        camera_0 = (
+            to_device(C0L0).astype(np.float32) * L1_over_L0_ratio + to_device(C0L1)
+        ) * 0.5
+        camera_1 = (
+            to_device(C1L0).astype(np.float32) * L1_over_L0_ratio + to_device(C1L1)
+        ) * 0.5
+
+    else:
+        L0_over_L1_ratio = 1 / L1_over_L0_ratio
+        camera_0 = (
+            to_device(C0L0) + to_device(C0L1).astype(np.float32) * L0_over_L1_ratio
+        ) * 0.5
+        camera_1 = (
+            to_device(C1L0) + to_device(C1L1).astype(np.float32) * L0_over_L1_ratio
+        ) * 0.5
 
     if camera_0.dtype != np.float32:
         LOG.warning(
