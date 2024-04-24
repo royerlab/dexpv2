@@ -6,6 +6,7 @@ from numpy.typing import ArrayLike
 
 from dexpv2.cuda import import_module
 from dexpv2.intensity import equalize_views
+from dexpv2.registration import apply_affine_transform
 from dexpv2.utils import translation_slicing
 
 LOG = logging.getLogger(__name__)
@@ -16,7 +17,7 @@ def multiview_fuse(
     C0L1: ArrayLike,
     C1L0: ArrayLike,
     C1L1: ArrayLike,
-    camera_1_translation: ArrayLike,
+    camera_1_T: ArrayLike,
     camera_1_flip: bool,
     L1_over_L0_ratio: Optional[float] = None,
     to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
@@ -24,7 +25,7 @@ def multiview_fuse(
     """
     Fuse views from a multi-view microscope.
     It assumes that the views were captured using two cameras and two light sheets.
-    The views from different cameras can be flipped and translated.
+    The views from different cameras can be flipped and affine-transformed.
     Translations are rounded and done at the pixel resolution.
 
     Parameters
@@ -37,8 +38,10 @@ def multiview_fuse(
         View from camera 1 and light sheet 0.
     C1L1 : ArrayLike
         View from camera 1 and light sheet 1.
-    camera_1_translation : ArrayLike
-        Translation between camera 1 and camera 0 (reference).
+    camera_1_T : ArrayLike
+        Transformation between camera 1 and camera 0 (reference).
+        When provided with a 1D array, it is interpreted as an integer translation in pixel space.
+        When provided with a 2D array, it is interpreted as an affine transformation in physical space.
     camera_1_flip : ArrayLike
         Indicates if camera 1 is flipped on the last axis.
     L1_over_L0_ratio : float, optional
@@ -78,15 +81,19 @@ def multiview_fuse(
             f"fusion array cast to {camera_0.dtype} using more memory than expected."
         )
 
-    camera_1_translation = np.asarray(camera_1_translation, like=camera_0)
-    ref_slice = translation_slicing(-camera_1_translation)
-    mov_slice = translation_slicing(camera_1_translation)
-
     if camera_1_flip:
         camera_1 = np.flip(camera_1, axis=-1)
 
-    camera_0[ref_slice] += camera_1[mov_slice]
-    camera_0[ref_slice] /= 2
+    camera_1_T = np.asarray(camera_1_T, like=camera_0)
+    if camera_1_T.ndim > 1:
+        camera_1 = apply_affine_transform(camera_1_T, camera_1, voxel_size=None)
+        camera_0 = (camera_0 + camera_1) * 0.5
+    else:
+        ref_slice = translation_slicing(-camera_1_T)
+        mov_slice = translation_slicing(camera_1_T)
+
+        camera_0[ref_slice] += camera_1[mov_slice]
+        camera_0[ref_slice] /= 2
 
     return camera_0
 
