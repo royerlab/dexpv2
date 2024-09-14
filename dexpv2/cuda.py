@@ -90,31 +90,40 @@ def torch_default_device() -> th.device:
     return th.device(device)
 
 
-def import_module(module: str, submodule: str) -> ModuleType:
-    """Import GPU accelerated module if available, otherwise returns CPU version.
+def import_module(
+    module: str,
+    submodule: str,
+    arr: Optional[ArrayLike] = None,
+) -> ModuleType:
+    """Import GPU accelerated module if available and matches optional array, otherwise returns CPU version.
 
     Parameters
     ----------
     module : str
         Main python module (e.g. skimage, scipy)
-
     submodule : str
         Secondary python module (e.g. morphology, ndimage)
+    arr : ArrayLike
+        If provided, it will be used to determine if GPU module should be imported.
 
     Returns
     -------
     ModuleType
         Imported submodule.
     """
-    cupy_module_name = f"{CUPY_MODULES[module]}.{submodule}"
-    try:
-        pkg = importlib.import_module(cupy_module_name)
-        LOG.info(f"{cupy_module_name} found.")
+    is_gpu_array = cp is not None and isinstance(arr, cp.ndarray)
 
-    except (ModuleNotFoundError, ImportError):
+    if arr is None or is_gpu_array:
+        cupy_module_name = f"{CUPY_MODULES[module]}.{submodule}"
+        try:
+            pkg = importlib.import_module(cupy_module_name)
+            LOG.info(f"{cupy_module_name} found.")
+            return pkg
 
-        pkg = importlib.import_module(f"{module}.{submodule}")
-        LOG.info(f"{cupy_module_name} not found. Using cpu equivalent")
+        except (ModuleNotFoundError, ImportError):
+            LOG.info(f"{cupy_module_name} not found. Using cpu equivalent")
+
+    pkg = importlib.import_module(f"{module}.{submodule}")
 
     return pkg
 

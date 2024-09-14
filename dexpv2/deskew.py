@@ -82,7 +82,7 @@ def _deskew(
     ArrayLike
         The deskewed volume.
     """
-    ndi = import_module("scipy", "ndimage")
+    ndi = import_module("scipy", "ndimage", crop)
 
     (nz, ny, nx) = crop.shape
     dtype = crop.dtype

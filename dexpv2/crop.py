@@ -104,7 +104,7 @@ def find_moving_bboxes_consensus(
         Bounding boxes of moving objects (N, 2 * D) array.
     shifts : ArrayLike
         Shifts of moving objects (N, D) array.
-    spatial_shape : ArrayLike
+    shape : ArrayLike
         Volume shape.
     quantile : float
         Quantile to use for consensus bounding box size.

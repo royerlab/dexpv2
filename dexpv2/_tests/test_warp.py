@@ -43,7 +43,7 @@ def test_warp(n_dim: int, multiscale: bool, interactive_test: bool) -> None:
         warp_field = estimate_multiscale_warp(
             image,
             moved_image,
-            n_scales=3,
+            n_scales=2,
             tile=tile,
             overlap=overlap,
             score_threshold=0.75,
@@ -57,7 +57,9 @@ def test_warp(n_dim: int, multiscale: bool, interactive_test: bool) -> None:
     if n_dim == 2:
         warp_field = warp_field[:-1, ...]
 
-    warped_image = apply_warp(cp.asarray(moved_image, dtype=np.float32), warp_field)
+    warped_image = apply_warp(
+        cp.asarray(moved_image, dtype=np.float32), cp.asarray(warp_field)
+    )
     warped_image = to_numpy(warped_image)
 
     if interactive_test:
