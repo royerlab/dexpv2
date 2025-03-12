@@ -46,7 +46,10 @@ def reconstruction_by_dilation(
 
 
 def fancy_otsu_threshold(
-    image: ArrayLike, remove_hist_mode: bool = False, min_foreground: float = 0.0
+    image: ArrayLike,
+    remove_hist_mode: bool = False,
+    min_foreground: float = 0.0,
+    max_foreground: float = 0.0,
 ) -> float:
     """
     Compute Otsu threshold with some additional features.
@@ -61,6 +64,8 @@ def fancy_otsu_threshold(
         Removes histogram mode before computing otsu threshold, useful when background regions are being detected.
     min_foreground : float, optional
         Minimum threshold value, by default 0.0
+    max_foreground: float, optional
+        Maximum threshold value, by default max value of image
 
     Returns
     -------
@@ -85,6 +90,11 @@ def fancy_otsu_threshold(
     LOG.info(f"Histogram with {nbins}")
 
     hist, bin_centers = exposure.histogram(image, nbins)
+
+    # clip bins and histogram beyond max_foreground value
+    if max_foreground != 0.0:
+        hist = [hist[i] for i in range(len(hist)) if bins[i] < max_foreground]
+        bins = [bin for bin in bins if bin < max_foreground]
 
     # histogram disconsidering pixels we are sure are background
     if remove_hist_mode:
