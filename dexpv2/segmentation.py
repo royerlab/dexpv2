@@ -49,7 +49,7 @@ def fancy_otsu_threshold(
     image: ArrayLike,
     remove_hist_mode: bool = False,
     min_foreground: float = 0.0,
-    max_foreground: Optional[float] = None,
+    max_foreground: float = None,
 ) -> float:
     """
     Compute Otsu threshold with some additional features.
@@ -90,11 +90,12 @@ def fancy_otsu_threshold(
     LOG.info(f"Histogram with {nbins}")
 
     hist, bin_centers = exposure.histogram(image, nbins)
-
+    print(len(bin_centers))
     # clip bins and histogram beyond max_foreground value
     if max_foreground is not None:
-        below_threshold_mask = bin < max_foreground
-        bins = bins[below_threshold_mask]
+        below_threshold_mask = bin_centers < np.sqrt(max_foreground)
+        bin_centers = bin_centers[below_threshold_mask]
+        print(bin_centers)
         hist = hist[below_threshold_mask]
 
     # histogram disconsidering pixels we are sure are background
@@ -109,7 +110,6 @@ def fancy_otsu_threshold(
 
     threshold = max(threshold, min_foreground)
     LOG.info(f"Threshold after minimum filtering {threshold}")
-
     return threshold
 
 
@@ -159,6 +159,7 @@ def detect_foreground(
     sigma: float = 15.0,
     remove_hist_mode: bool = False,
     min_foreground: float = 0.0,
+    max_foreground: float = None,
 ) -> ArrayLike:
     """
     Detect foreground using morphological reconstruction by dilation and thresholding.
@@ -194,6 +195,7 @@ def detect_foreground(
         small_foreground,
         remove_hist_mode=remove_hist_mode,
         min_foreground=min_foreground,
+        max_foreground=max_foreground,
     )
 
     mask = foreground > threshold
