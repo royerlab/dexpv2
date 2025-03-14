@@ -92,9 +92,10 @@ def fancy_otsu_threshold(
     hist, bin_centers = exposure.histogram(image, nbins)
 
     # clip bins and histogram beyond max_foreground value
-    if max_foreground != 0.0:
-        hist = [hist[i] for i in range(len(hist)) if bins[i] < max_foreground]
-        bins = [bin for bin in bins if bin < max_foreground]
+    if max_foreground is not None:
+        below_threshold_mask = bin < max_foreground
+        bins = bins[below_threshold_mask]
+        hist = hist[below_threshold_mask]
 
     # histogram disconsidering pixels we are sure are background
     if remove_hist_mode:
