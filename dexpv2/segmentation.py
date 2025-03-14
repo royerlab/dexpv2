@@ -49,7 +49,7 @@ def fancy_otsu_threshold(
     image: ArrayLike,
     remove_hist_mode: bool = False,
     min_foreground: float = 0.0,
-    max_foreground: float = 0.0,
+    max_foreground: Optional[float] = None,
 ) -> float:
     """
     Compute Otsu threshold with some additional features.
