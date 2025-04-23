@@ -133,7 +133,7 @@ def find_moving_bboxes_consensus(
     if outlier_threshold is not None:
         shift_std = shifts.std(axis=0)
         mean_shift = shifts.mean(axis=0)
-        outlier_shift = np.abs(shifts - mean_shift) > 2 * shift_std
+        outlier_shift = np.abs(shifts - mean_shift) > outlier_threshold * shift_std
         shifts[outlier_shift] = 0
 
         print(f"Mean shift: {mean_shift}")
