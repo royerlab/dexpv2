@@ -52,12 +52,17 @@ def test_foreground_detection_with_float16() -> None:
     foreground_cp = reconstruction_by_dilation(nuclei, mask, iterations=10)
     foreground_cp = to_cpu(foreground_cp)
 
+    nuclei_f32 = nuclei.astype(xp.float32)
+    mask_f32 = mask.astype(xp.float32)
+    foreground_f32 = reconstruction_by_dilation(nuclei_f32, mask_f32, iterations=10)
+
     # Convert to numpy for comparison
     # Obs. skimage operations won't work with np.float16 so we need to convert
     # to float32 and hope that the conversion doesn't change the result too much
-    nuclei_np = nuclei.astype(xp.float32)
-    mask_np = mask.astype(xp.float32)
+    nuclei_np = to_cpu(nuclei_f32)
+    mask_np = to_cpu(mask_f32)
     foreground_np = reconstruction_by_dilation(nuclei_np, mask_np, iterations=10)
 
     # Check that the output is a binary mask
     assert np.allclose(foreground_cp, foreground_np)
+    assert np.allclose(foreground_cp, foreground_f32)
