@@ -36,8 +36,7 @@ def test_foreground_detection(interactive_test: bool) -> None:
 
 
 def test_foreground_detection_with_float16() -> None:
-    # Test with float16 dat
-    # a
+    # Test with float16 data
     nuclei = xp.asarray(cells3d()[:, 1])
     nuclei = nuclei / nuclei.max()
     nuclei = nuclei.astype(xp.float16)
