@@ -113,7 +113,7 @@ def import_module(
     """
     is_gpu_array = cp is not None and isinstance(arr, cp.ndarray)
 
-    if arr is None or is_gpu_array:
+    if is_gpu_array:
         cupy_module_name = f"{CUPY_MODULES[module]}.{submodule}"
         try:
             pkg = importlib.import_module(cupy_module_name)
