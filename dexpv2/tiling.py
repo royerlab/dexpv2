@@ -163,6 +163,7 @@ def apply_tiled(
     pad: str = "reflect",
     to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
     out_dtype: np.dtype = np.float32,
+    blend_mode: str = "linear",
 ) -> np.ndarray:
     """
     Apply a given function to tiled portions of an array.
@@ -183,12 +184,22 @@ def apply_tiled(
         Function to send tiles to device expected by `func`.
     out_dtype : np.dtype, optional
         Data type of the output array, by default np.float32.
+    blend_mode : str, optional
+        Blending strategy for overlapping tiles. ``"linear"`` (default) uses
+        sigmoid-weighted linear interpolation — correct for continuous outputs
+        such as probability maps or intensity images. ``"discrete"`` uses
+        nearest-centre stitching: each voxel receives the value from whichever
+        tile has the highest blending weight at that location — correct for
+        discrete outputs such as integer label images.
 
     Returns
     -------
     np.ndarray
         Output array with the function applied and blended together for each tiled portions.
     """
+    if blend_mode not in ("linear", "discrete"):
+        raise ValueError(f"blend_mode must be 'linear' or 'discrete', got {blend_mode!r}.")
+
     if isinstance(overlap, int):
         overlap = (overlap,) * len(tile)
 
@@ -229,14 +240,17 @@ def apply_tiled(
         del in_tile
 
         if out_arr is None:
-            out_arr = np.zeros(
-                out_tile.shape[:num_non_tiled] + arr.shape[num_non_tiled:],
-                dtype=out_dtype,
-            )
+            out_shape = out_tile.shape[:num_non_tiled] + arr.shape[num_non_tiled:]
+            out_arr = np.zeros(out_shape, dtype=out_dtype)
 
-        out_tile = blending(out_tile)
-        out_tile = to_numpy(out_tile)
-        out_arr[slicing] += out_tile
+        if blend_mode == "discrete":
+            out_tile = to_numpy(out_tile)
+            np.maximum(out_arr[slicing], out_tile, out=out_arr[slicing])
+        else:
+            out_tile = blending(out_tile)
+            out_tile = to_numpy(out_tile)
+            out_arr[slicing] += out_tile
+
         del out_tile
 
     slicing = (...,) + tuple(slice(o, size + o) for size, o in zip(orig_shape, overlap))
