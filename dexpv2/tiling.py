@@ -188,9 +188,10 @@ def apply_tiled(
         Blending strategy for overlapping tiles. ``"linear"`` (default) uses
         sigmoid-weighted linear interpolation — correct for continuous outputs
         such as probability maps or intensity images. ``"discrete"`` uses
-        nearest-centre stitching: each voxel receives the value from whichever
-        tile has the highest blending weight at that location — correct for
-        discrete outputs such as integer label images.
+        element-wise maximum across all tiles: each voxel takes the largest
+        value written by any tile. Correct for discrete outputs such as
+        integer label images where linear interpolation would produce
+        meaningless fractional IDs.
 
     Returns
     -------
@@ -217,7 +218,7 @@ def apply_tiled(
     arr = np.pad(arr, pad_width, mode=pad)
     out_arr = None
 
-    blending = BlendingMap(tile, overlap, num_non_tiled, to_device=to_device)
+    blending = BlendingMap(tile, overlap, num_non_tiled, to_device=to_device) if blend_mode == "linear" else None
 
     tiling_start = list(
         product(
@@ -247,7 +248,7 @@ def apply_tiled(
             out_tile = to_numpy(out_tile)
             np.maximum(out_arr[slicing], out_tile, out=out_arr[slicing])
         else:
-            out_tile = blending(out_tile)
+            out_tile = blending(out_tile)  # type: ignore[misc]
             out_tile = to_numpy(out_tile)
             out_arr[slicing] += out_tile
 

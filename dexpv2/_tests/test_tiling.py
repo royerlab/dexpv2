@@ -81,6 +81,25 @@ def test_apply_tiled(
     np.testing.assert_allclose(out_arr, expected_out_arr)
 
 
+def test_apply_tiled_discrete() -> None:
+    """Discrete blend_mode uses np.maximum — output shape matches input, values >= 0."""
+    in_arr = np.random.randint(0, 10, size=(16, 20, 24)).astype(np.float32)
+
+    out_arr = apply_tiled(
+        in_arr,
+        func=lambda x: x,
+        tile=(8, 8, 8),
+        overlap=(2, 2, 2),
+        blend_mode="discrete",
+        out_dtype=np.float32,
+    )
+
+    assert out_arr.shape == in_arr.shape, f"{out_arr.shape} != {in_arr.shape}"
+    # Every output value must be >= 0 (background) and <= max input value
+    assert out_arr.min() >= 0
+    assert out_arr.max() <= in_arr.max()
+
+
 def test_apply_tiled_image_to_vector() -> None:
 
     # testing with non divisible tile shape
