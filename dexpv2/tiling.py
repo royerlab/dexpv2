@@ -249,7 +249,7 @@ def apply_tiled(
             np.maximum(out_arr[slicing], out_tile, out=out_arr[slicing])
         else:
             out_tile = blending(out_tile)  # type: ignore[misc]
-            out_tile = to_numpy(out_tile)
+            out_tile = to_numpy(out_tile).astype(out_dtype)
             out_arr[slicing] += out_tile
 
         del out_tile
