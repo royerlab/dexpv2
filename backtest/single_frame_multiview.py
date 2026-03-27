@@ -42,7 +42,7 @@ def main(interactive: bool) -> None:
 
             fused = multiview_fuse(
                 **views,
-                camera_1_translation=translation,
+                camera_1_T=translation,
                 camera_1_flip=True,
                 to_device=cp.asarray,
             )

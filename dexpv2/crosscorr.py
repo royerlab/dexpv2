@@ -1,5 +1,5 @@
 import logging
-from typing import Callable, Tuple, cast
+from typing import Callable, Optional, Tuple, cast
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -11,11 +11,25 @@ from dexpv2.utils import center_crop, pad_to_shape, to_cpu
 LOG = logging.getLogger(__name__)
 
 
+def _match_shape(img: ArrayLike, shape: Tuple[int, ...]) -> ArrayLike:
+    """Pad or crop array to match provided shape."""
+
+    if np.any(shape > img.shape):
+        padded_shape = np.maximum(img.shape, shape)
+        img = pad_to_shape(img, padded_shape, mode="reflect")
+
+    if np.any(shape < img.shape):
+        img = center_crop(img, shape)
+
+    return img
+
+
 def phase_cross_corr(
     ref_img: ArrayLike,
     mov_img: ArrayLike,
     maximum_shift: float = 1.0,
     to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
+    transform: Optional[Callable[[ArrayLike], ArrayLike]] = np.log1p,
 ) -> Tuple[int, ...]:
     """
     Computes translation shift using arg. maximum of phase cross correlation.
@@ -45,20 +59,15 @@ def phase_cross_corr(
         f"with maximum shift of {maximum_shift}"
     )
 
-    if np.any(shape > ref_img.shape):
-        padded_shape = np.maximum(ref_img.shape, shape)
-        ref_img = pad_to_shape(ref_img, padded_shape, mode="reflect")
-        mov_img = pad_to_shape(mov_img, padded_shape, mode="reflect")
-
-    if np.any(shape < ref_img.shape):
-        ref_img = center_crop(ref_img, shape)
-        mov_img = center_crop(mov_img, shape)
+    ref_img = _match_shape(ref_img, shape)
+    mov_img = _match_shape(mov_img, shape)
 
     ref_img = to_device(ref_img)
     mov_img = to_device(mov_img)
 
-    ref_img = np.log1p(ref_img)
-    mov_img = np.log1p(mov_img)
+    if transform is not None:
+        ref_img = transform(ref_img)
+        mov_img = transform(mov_img)
 
     Fimg1 = np.fft.rfftn(ref_img)
     Fimg2 = np.fft.rfftn(mov_img)
@@ -74,7 +83,8 @@ def phase_cross_corr(
 
     corr = np.fft.fftshift(np.abs(corr))
 
-    peak = np.unravel_index(to_cpu(np.argmax(corr)), corr.shape)
+    argmax = to_cpu(np.argmax(corr))
+    peak = np.unravel_index(argmax, corr.shape)
     peak = tuple(s // 2 - p for s, p in zip(corr.shape, peak))
 
     LOG.info(f"phase cross corr. peak at {peak}")

@@ -74,4 +74,4 @@ def test_flow_field(interactive_test: bool) -> None:
 
         napari.run()
 
-    assert th.allclose(trajectory, mus.float(), atol=0.5, rtol=0.0)
+    th.testing.assert_close(trajectory.squeeze(), mus.float(), atol=0.5, rtol=0.0)
