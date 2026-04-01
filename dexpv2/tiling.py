@@ -1,6 +1,7 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from itertools import product
-from typing import Callable, Protocol, Tuple, Union
+from typing import Callable, Generator, Protocol, Tuple, Union
 
 import numpy as np
 from numpy.typing import ArrayLike
@@ -155,8 +156,51 @@ class BlendingMap:
         return array
 
 
+def _iter_tiles(
+    arr: ArrayLike,
+    slicings: list[tuple],
+    prefetch: bool,
+) -> Generator[tuple[tuple, ArrayLike], None, None]:
+    """Iterate over pre-computed tile slicings, optionally prefetching the next tile.
+
+    When ``prefetch=True`` a background thread fetches ``arr[next_slicing]``
+    while the caller processes the current tile, hiding I/O latency behind
+    compute.  The prefetch is always a plain ``np.asarray`` call so the
+    background thread only does I/O; ``to_device`` stays on the main thread.
+
+    Parameters
+    ----------
+    arr : ArrayLike
+        Source array (numpy, dask, zarr-backed, …).
+    slicings : list[tuple]
+        Pre-computed slicings, one per tile.
+    prefetch : bool
+        Whether to prefetch the next tile in a background thread.
+
+    Yields
+    ------
+    slicing : tuple
+        The slicing for the current tile (used for both reading and writing).
+    tile_data : ArrayLike
+        The fetched tile data (numpy array when ``prefetch=True``).
+    """
+    LOG.info(f"Prefetching: {prefetch}")
+    if not prefetch:
+        for slicing in slicings:
+            yield slicing, arr[slicing]
+        return
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(np.asarray, arr[slicings[0]])
+        for idx, slicing in enumerate(slicings):
+            tile_data = future.result()
+            if idx + 1 < len(slicings):
+                future = pool.submit(np.asarray, arr[slicings[idx + 1]])
+            yield slicing, tile_data
+
+
 def apply_tiled(
-    arr: np.ndarray,
+    arr: ArrayLike,
     func: Callable[[ArrayLike], ArrayLike],
     tile: Tuple[int, ...],
     overlap: Union[int, Tuple[int, ...]],
@@ -164,7 +208,8 @@ def apply_tiled(
     to_device: Callable[[ArrayLike], ArrayLike] = lambda x: x,
     out_dtype: np.dtype = np.float32,
     blend_mode: str = "linear",
-) -> np.ndarray:
+    prefetch: bool = False,
+) -> ArrayLike:
     """
     Apply a given function to tiled portions of an array.
 
@@ -192,11 +237,16 @@ def apply_tiled(
         value written by any tile. Correct for discrete outputs such as
         integer label images where linear interpolation would produce
         meaningless fractional IDs.
+    prefetch : bool, optional
+        If ``True``, fetch the next tile from ``arr`` in a background thread
+        while ``func`` processes the current tile, overlapping I/O with
+        compute. Useful when ``arr`` is backed by disk or network storage
+        (e.g. zarr on NFS) and ``func`` is GPU-bound. Default ``False``.
 
     Returns
     -------
-    np.ndarray
-        Output array with the function applied and blended together for each tiled portions.
+    ArrayLike
+        Output array with the function applied and blended together for each tiled portion.
     """
     if blend_mode not in ("linear", "discrete"):
         raise ValueError(f"blend_mode must be 'linear' or 'discrete', got {blend_mode!r}.")
@@ -220,22 +270,26 @@ def apply_tiled(
 
     blending = BlendingMap(tile, overlap, num_non_tiled, to_device=to_device) if blend_mode == "linear" else None
 
-    tiling_start = list(
-        product(
+    slicings = [
+        (...,) + tuple(
+            slice(start - o, start + t + o)
+            for start, t, o in zip(start_indices, tile, overlap)
+        )
+        for start_indices in product(
             *[
                 range(o, size + 2 * o, t + o)  # t + o step, because of blending map
                 for size, t, o in zip(orig_shape, tile, overlap)
             ]
         )
-    )
+    ]
 
-    for start_indices in tqdm(tiling_start, "Applying function to tiles"):
-        slicing = (...,) + tuple(
-            slice(start - o, start + t + o)
-            for start, t, o in zip(start_indices, tile, overlap)
-        )
-
-        in_tile = to_device(arr[slicing])
+    for slicing, arr_tile in tqdm(
+        _iter_tiles(arr, slicings, prefetch),
+        desc="Applying function to tiles",
+        total=len(slicings),
+    ):
+        in_tile = to_device(arr_tile)
+        del arr_tile
 
         out_tile = func(in_tile)
         del in_tile
