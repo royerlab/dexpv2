@@ -201,3 +201,57 @@ def detect_foreground(
         napari.run()
 
     return mask
+
+
+def watershed_segment_from_height(
+    height: ArrayLike,
+    mask: ArrayLike,
+    h: int = 0,
+) -> np.ndarray:
+    """GPU watershed flooding from minima of *height* inside *mask*.
+
+    Wraps :func:`cuws.watershed_from_minima`: rescales *height* to ``uint16``
+    (the dtype required by cuws) using its global min/max, runs the watershed
+    on GPU, and returns ``int32`` labels on CPU.  Both *height* and *mask* are
+    cast to ``cupy`` arrays internally; numpy inputs are accepted but trigger a
+    host-to-device copy.
+
+    Parameters
+    ----------
+    height : ArrayLike
+        Float height function.  Local minima inside *mask* become segment
+        seeds; high values act as barriers.  Polarity convention: low values =
+        cell interior, high values = boundaries.  Callers using a signal that
+        peaks at cell centres (e.g. blurred intensity, foreground probability)
+        should invert it before calling.
+    mask : ArrayLike
+        Boolean foreground mask, same shape as *height*.
+    h : int, optional
+        H-minima suppression threshold passed through to cuws (in uint16 units
+        after normalisation).  Minima shallower than ``h`` are merged into
+        their deepest neighbour.  Default ``0`` keeps every local minimum.
+
+    Returns
+    -------
+    np.ndarray
+        Int32 label image on CPU.  ``0`` is background.  Non-zero values are
+        each segment's root voxel linearised index as returned by cuws — they
+        are *not* consecutive ``1..N`` ids.  Two voxels share a label iff they
+        belong to the same segment.  Volumes with more than ≈2.15×10⁹ voxels
+        will overflow ``int32`` — cast to ``int64`` upstream if needed.
+    """
+    import cuws  # lazy: optional runtime dependency
+    import cupy as cp  # lazy: GPU-only path
+
+    height = cp.asarray(height)
+    mask = cp.asarray(mask)
+
+    h_min = float(height.min())
+    h_max = float(height.max())
+    if h_max <= h_min:
+        LOG.warning("Empty height image (min=%.3g, max=%.3g); returning empty labels.", h_min, h_max)
+        return np.zeros(height.shape, dtype=np.int32)
+
+    height_u16 = ((height - h_min) / (h_max - h_min) * 65535).astype(cp.uint16)
+    labels = cuws.watershed_from_minima(height_u16, mask, h=h)
+    return cp.asnumpy(labels).astype(np.int32)
