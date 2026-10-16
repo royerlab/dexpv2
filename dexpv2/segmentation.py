@@ -12,7 +12,7 @@ LOG.setLevel(logging.INFO)
 
 
 def reconstruction_by_dilation(
-    seed: ArrayLike, mask: ArrayLike, iterations: int
+    seed: ArrayLike, mask: ArrayLike, iterations: int, mode: str = "constant"
 ) -> ArrayLike:
     """
     Morphological reconstruction by dilation.
@@ -29,6 +29,10 @@ def reconstruction_by_dilation(
         Guidance mask.
     iterations : int
         Number of dilations.
+    mode : str
+        Border mode of each dilation, as in ``scipy.ndimage.grey_dilation``.
+        On non-negative data "nearest" gives the same result as "constant";
+        CuPy cannot compile "constant" for float16 input (cupy/cupy#9122).
 
     Returns
     -------
@@ -39,7 +43,7 @@ def reconstruction_by_dilation(
     seed = np.minimum(seed, mask, out=seed)  # just making sure
 
     for _ in range(iterations):
-        seed = ndi.grey_dilation(seed, size=3, output=seed, mode="constant")
+        seed = ndi.grey_dilation(seed, size=3, output=seed, mode=mode)
         seed = np.minimum(seed, mask, out=seed)
 
     return seed
